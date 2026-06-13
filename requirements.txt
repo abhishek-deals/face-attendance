@@ -1,0 +1,32 @@
+# Face Attendance System — Working Requirements
+# Tested on: Python 3.13.3 / Windows 11 / AMD Athlon / 4GB RAM
+#
+# IMPORTANT: These are the EXACT versions confirmed working together.
+# The key constraint is NumPy >= 2 (required by Python 3.13).
+# opencv 4.8.x was compiled against NumPy 1.x — DO NOT use it with Python 3.13.
+#
+# ── INSTALL ONE BY ONE to avoid RAM overload ──────────────
+#
+#   pip install opencv-python
+#   pip install opencv-contrib-python
+#   pip install pandas
+#   pip install Pillow
+#   pip install openpyxl
+#
+# numpy and et-xmlfile install automatically as dependencies.
+# sqlite3 is built into Python — no install needed.
+#
+# DO NOT install: tensorflow, keras, torch, face_recognition, dlib, mediapipe
+# ──────────────────────────────────────────────────────────
+
+# Core OpenCV (must match versions — both must be same major.minor)
+opencv-python>=4.9.0
+opencv-contrib-python>=4.9.0
+
+# Scientific computing (NumPy >= 2 required for Python 3.13)
+numpy>=2.0.0
+
+# Data & reporting
+pandas>=2.0.0
+Pillow>=10.0.0
+openpyxl>=3.1.2
