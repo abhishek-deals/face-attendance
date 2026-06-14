@@ -729,40 +729,46 @@ function stopCamera() {
   document.getElementById('btn_capture').style.display = 'none';
 }
 
-async function captureSinglePhoto(stepIndex) {
-  const instructions = [
-    "Photo 1: Look STRAIGHT at the camera",
-    "Photo 2: Turn your head SLIGHTLY RIGHT",
-    "Photo 3: Turn your head SLIGHTLY LEFT"
-  ];
-  showStatus('cam_status', instructions[stepIndex] + " (Detecting face...)", 'info');
+async function captureStraightPhoto() {
+  showStatus('cam_status', '📸 Look STRAIGHT at the camera — detecting face...', 'info');
 
   let attempts = 0;
-  while (capturing && captureCount === stepIndex) {
+  while (capturing && captureCount === 0) {
     attempts++;
-    const { dataUrl, faceFound } = captureFrameWithFaceDetect();
+    const { dataUrl, faceFound, isCentered } = captureFrameWithFaceDetect();
+    
+    if (!faceFound) {
+      if (attempts % 8 === 0)
+        showStatus('cam_status', '❌ No face detected — look straight at the camera.', 'info');
+      await sleep(200);
+      continue;
+    }
+    if (!isCentered) {
+      if (attempts % 8 === 0)
+        showStatus('cam_status', '⚠️ Face not centered — move closer and look straight.', 'info');
+      await sleep(200);
+      continue;
+    }
+
     try {
       const res = await fetch('/api/capture_frame', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ frame: dataUrl, student_id: currentSid, name: currentName, face_detected: faceFound })
+        body: JSON.stringify({ frame: dataUrl, student_id: currentSid, name: currentName, face_detected: true })
       });
       const data = await res.json();
-      if (data.ok && data.face_found && data.count > stepIndex) {
+      if (data.ok && data.face_found) {
         captureCount = data.count;
         updateCamProgress(captureCount);
-        showStatus('cam_status', `✅ Photo ${captureCount} captured!`, 'success');
+        showStatus('cam_status', '✅ Photo captured! Student registered successfully.', 'success');
         await sleep(800);
         break;
-      } else if (!faceFound) {
-        if (attempts % 10 === 0) // Only update message every 10 attempts to avoid flicker
-          showStatus('cam_status', instructions[stepIndex] + " — No face detected. Look at the camera.", 'info');
       } else if (!data.ok) {
-        showStatus('cam_status', "Server Error: " + data.error, 'error');
+        showStatus('cam_status', 'Server Error: ' + data.error, 'error');
         await sleep(2000);
       }
     } catch(e) {
-      showStatus('cam_status', "Network Error: " + e.message, 'error');
+      showStatus('cam_status', 'Network Error: ' + e.message, 'error');
       await sleep(2000);
     }
     await sleep(200);
@@ -776,22 +782,19 @@ async function startGuidedCapture() {
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('btn_stop').style.display = 'inline-block';
 
-  for (let i = 0; i < 3; i++) {
-    if (!capturing) break;
-    await captureSinglePhoto(i);
-  }
+  await captureStraightPhoto();
 
   capturing = false;
   document.getElementById('btn_stop').style.display = 'none';
-  if (captureCount >= 3) { onCaptureDone(); }
-  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' photos saved.', 'info'); }
+  if (captureCount >= 1) { onCaptureDone(); }
+  else { showStatus('cam_status', 'Capture stopped. No photo saved.', 'info'); }
 }
 
 function stopCapture() {
   capturing = false;
 }
 
-// Capture a frame and do basic face detection in the browser using skin-tone heuristic
+// Detect face in the browser: checks skin tone AND that the face is centered
 function captureFrameWithFaceDetect() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
@@ -800,23 +803,30 @@ function captureFrameWithFaceDetect() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
 
-  // Sample center region pixels to check for skin tone (basic face detection)
-  const imgData = ctx.getImageData(90, 50, 140, 160); // center-ish region
-  const data = imgData.data;
-  let skinPixels = 0;
-  const totalPixels = data.length / 4;
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2];
-    // Skin tone detection in RGB
-    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) {
-      skinPixels++;
-    }
+  // Check FULL frame for any skin pixels
+  const fullData = ctx.getImageData(0, 0, 320, 240).data;
+  let totalSkin = 0;
+  for (let i = 0; i < fullData.length; i += 4) {
+    const r = fullData[i], g = fullData[i+1], b = fullData[i+2];
+    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) totalSkin++;
   }
-  const skinRatio = skinPixels / totalPixels;
-  const faceFound = skinRatio > 0.12; // At least 12% skin pixels in center region
+  const totalPixels = (fullData.length / 4);
+  const faceFound = (totalSkin / totalPixels) > 0.05;
+
+  // Check CENTER region — more skin here means face is centered/straight
+  const cx = 100, cy = 50, cw = 120, ch = 140;
+  const centerData = ctx.getImageData(cx, cy, cw, ch).data;
+  let centerSkin = 0;
+  for (let i = 0; i < centerData.length; i += 4) {
+    const r = centerData[i], g = centerData[i+1], b = centerData[i+2];
+    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) centerSkin++;
+  }
+  const centerTotal = centerData.length / 4;
+  // Face is "centered" if more than 20% of the center region is skin
+  const isCentered = faceFound && (centerSkin / centerTotal) > 0.20;
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-  return { dataUrl, faceFound };
+  return { dataUrl, faceFound, isCentered };
 }
 
 function captureFrame() {
@@ -827,17 +837,16 @@ function captureFrame() {
   return canvas.toDataURL('image/jpeg', 0.8);
 }
 
-
 function updateCamProgress(count) {
-  const pct = Math.min(100, Math.round(count / 3 * 100));
+  const pct = count >= 1 ? 100 : 0;
   document.getElementById('progress_fill').style.width = pct + '%';
-  document.getElementById('progress_text').textContent = count + ' of 3 photos captured';
-  document.getElementById('cam_count').textContent = count + ' / 3';
+  document.getElementById('progress_text').textContent = count >= 1 ? '1 of 1 photo captured' : '0 of 1 photo captured';
+  document.getElementById('cam_count').textContent = count + ' / 1';
 }
 
 function onCaptureDone() {
   stopCamera();
-  showStatus('cam_status', 'All 3 photos captured! Student registered successfully.', 'success');
+  showStatus('cam_status', '✅ Straight face photo captured! Student registered.', 'success');
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('done_section').style.display = 'block';
 }
@@ -1208,18 +1217,18 @@ def api_capture_frame(body_bytes):
         # Count existing images
         existing = len([f for f in os.listdir(folder) if f.lower().endswith(".jpg")])
 
-        if existing >= 3:
+        if existing >= 1:
             _register_student(sid, name.replace("_", " "))
             return {"ok": True, "face_found": True, "count": existing}
 
-        # Save the image directly (browser already cropped/resized the face)
+        # Save the image directly (browser already detected the face)
         img_path = os.path.join(folder, f"{existing + 1}.jpg")
         with open(img_path, "wb") as f:
             f.write(img_bytes)
 
         new_count = existing + 1
 
-        if new_count >= 3:
+        if new_count >= 1:
             _register_student(sid, name.replace("_", " "))
 
         return {"ok": True, "face_found": True, "count": new_count}
@@ -1363,19 +1372,34 @@ def api_recognize(body_bytes):
             return {"ok": True, "name": None}
             
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Strict frontal-face detection: high minNeighbors=8, scaleFactor=1.1
+        # This rejects side/turned faces and only accepts clearly frontal faces
         detector = cv2.CascadeClassifier(CASCADE_PATH)
-        faces = detector.detectMultiScale(gray, 1.3, 5, minSize=(40,40))
+        faces = detector.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=8,
+            minSize=(60, 60),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
         
         if len(faces) == 0:
             return {"ok": True, "name": None}
-            
-        # Only check the largest face
+
+        # Pick the largest face and verify it is centered in the frame
+        fh, fw = gray.shape
         x, y, w, h = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0]
+        face_cx = x + w // 2
+        face_cy = y + h // 2
+        # Face center must be within 35% of frame center horizontally and 40% vertically
+        if abs(face_cx - fw // 2) > fw * 0.35 or abs(face_cy - fh // 2) > fh * 0.40:
+            return {"ok": True, "name": None}  # face is off-center / turned
+
         face_crop = cv2.resize(gray[y:y+h, x:x+w], (100, 100))
         
         label, conf = global_recognizer.predict(face_crop)
         
-        if conf < 110:
+        if conf < 100:
             name = global_names.get(label, "Unknown")
             if name != "Unknown":
                 from db import mark_attendance
