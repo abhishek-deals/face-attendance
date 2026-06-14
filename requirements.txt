@@ -14,3 +14,6 @@ Pillow>=10.0.0
 
 # Web framework
 Flask>=3.0.0
+
+# PostgreSQL driver for persistent cloud storage (Neon)
+psycopg2-binary>=2.9.0

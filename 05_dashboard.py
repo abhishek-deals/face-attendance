@@ -32,44 +32,89 @@ TRAINER_PATH   = os.environ.get("TRAINER_PATH", "trainer")
 CASCADE_PATH   = os.environ.get("CASCADE_PATH", os.path.join("haarcascade", "haarcascade_frontalface_default.xml"))
 PORT           = int(os.environ.get("PORT", 5000))
 
+# Detect if running on Vercel (cloud) or locally
+IS_CLOUD = bool(os.environ.get("DATABASE_URL", ""))
+
+# Import persistent store only if on cloud
+if IS_CLOUD:
+    try:
+        import pdb as pstore
+    except ImportError:
+        pstore = None
+else:
+    pstore = None
+
 # Global training status
 training_status = {"running": False, "done": False, "message": "", "students": []}
 
 
 # ══════════════════════════════════════════════
-# DATABASE HELPERS
+# DATABASE HELPERS  (SQLite locally, Postgres on Vercel)
 # ══════════════════════════════════════════════
 def db_query(sql, params=()):
-    if not os.path.exists(DB_PATH):
-        return []
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        return [dict(row) for row in cur.fetchall()]
-    except Exception:
-        return []
-    finally:
-        conn.close()
+    """Run a SELECT query. Uses PostgreSQL on Vercel, SQLite locally."""
+    if IS_CLOUD and pstore:
+        # On cloud: route to pstore's direct connection
+        import psycopg2, psycopg2.extras
+        conn = pstore.get_conn()
+        try:
+            # Convert SQLite ? placeholders to PostgreSQL %s
+            pg_sql = sql.replace("?", "%s")
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(pg_sql, params)
+                return [dict(r) for r in cur.fetchall()]
+        except Exception:
+            return []
+        finally:
+            conn.close()
+    else:
+        if not os.path.exists(DB_PATH):
+            return []
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+        except Exception:
+            return []
+        finally:
+            conn.close()
 
 def db_execute(sql, params=()):
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        conn.commit()
-        return cur.rowcount
-    except Exception:
-        return 0
-    finally:
-        conn.close()
+    """Run an INSERT/UPDATE/DELETE. Uses PostgreSQL on Vercel, SQLite locally."""
+    if IS_CLOUD and pstore:
+        import psycopg2
+        conn = pstore.get_conn()
+        try:
+            pg_sql = sql.replace("?", "%s")
+            with conn.cursor() as cur:
+                cur.execute(pg_sql, params)
+                rows = cur.rowcount
+            conn.commit()
+            return rows
+        except Exception:
+            return 0
+        finally:
+            conn.close()
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
+            return cur.rowcount
+        except Exception:
+            return 0
+        finally:
+            conn.close()
 
 def get_today():
     return datetime.now().strftime("%Y-%m-%d")
 
 def get_time():
     return datetime.now().strftime("%H:%M:%S")
+
 
 
 # ══════════════════════════════════════════════
