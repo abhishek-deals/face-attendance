@@ -1120,28 +1120,43 @@ function captureFrame() {
 async function startScanning() {
   scanning = true;
   document.getElementById('cam_status_text').textContent = 'Scanning...';
-  document.getElementById('scan_status').textContent = 'Scanning for faces...';
+  document.getElementById('scan_status').textContent = 'Look straight at the camera...';
   document.getElementById('scan_status').className = 'status-box info';
 
   let lastRecognized = "";
 
   while (scanning) {
-    const frame = captureFrame();
+    // Browser-side check first: only process if face is frontal/centered
+    const { dataUrl, faceFound, isCentered } = captureLiveFrame();
+
+    if (!faceFound || !isCentered) {
+      // Don't send to server — just show guidance
+      if (!faceFound) {
+        document.getElementById('scan_status').textContent = 'No face detected — look straight at the camera';
+        document.getElementById('scan_status').className = 'status-box info';
+      } else {
+        document.getElementById('scan_status').textContent = 'Face not centered — look straight into the camera';
+        document.getElementById('scan_status').className = 'status-box info';
+      }
+      lastRecognized = "";
+      await new Promise(r => setTimeout(r, 200));
+      continue;
+    }
+
     try {
       const res = await fetch('/api/recognize', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ frame: frame })
+        body: JSON.stringify({ frame: dataUrl })
       });
       const data = await res.json();
       
       if (data.ok && data.name && data.name !== "Unknown") {
         if (data.name !== lastRecognized) {
             lastRecognized = data.name;
-            document.getElementById('scan_status').textContent = `✅ ${data.name} marked Present!`;
+            document.getElementById('scan_status').textContent = `\u2705 ${data.name} marked Present!`;
             document.getElementById('scan_status').className = 'status-box success';
             
-            // Add to list
             const list = document.getElementById('recognized_list');
             const item = document.createElement('div');
             item.style = 'padding:10px;background:var(--card);border:1px solid var(--green);border-radius:8px;display:flex;justify-content:space-between;align-items:center';
@@ -1149,11 +1164,11 @@ async function startScanning() {
             list.prepend(item);
         }
       } else if (data.ok && data.name === "Unknown") {
-        document.getElementById('scan_status').textContent = 'Unknown Face (Score: ' + Math.round(data.conf) + ' / Needs < 150)';
+        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' / Needs < 150)';
         document.getElementById('scan_status').className = 'status-box error';
         lastRecognized = "";
       } else if (data.ok && data.name === null) {
-        document.getElementById('scan_status').textContent = 'Scanning... Look straight at camera';
+        document.getElementById('scan_status').textContent = 'Look straight at the camera...';
         document.getElementById('scan_status').className = 'status-box info';
         lastRecognized = "";
       } else if (!data.ok) {
@@ -1164,10 +1179,42 @@ async function startScanning() {
       }
     } catch(e) {}
     
-    // Check rapidly
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 150));
   }
 }
+
+// Capture live frame with browser-side frontal-face detection
+function captureLiveFrame() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, 320, 240);
+
+  // Full frame skin check
+  const fullData = ctx.getImageData(0, 0, 320, 240).data;
+  let totalSkin = 0;
+  for (let i = 0; i < fullData.length; i += 4) {
+    const r = fullData[i], g = fullData[i+1], b = fullData[i+2];
+    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) totalSkin++;
+  }
+  const faceFound = (totalSkin / (fullData.length / 4)) > 0.05;
+
+  // Center region check — face must be in center 120x140 area
+  const centerData = ctx.getImageData(100, 50, 120, 140).data;
+  let centerSkin = 0;
+  for (let i = 0; i < centerData.length; i += 4) {
+    const r = centerData[i], g = centerData[i+1], b = centerData[i+2];
+    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) centerSkin++;
+  }
+  // isCentered: face skin must be >22% of center zone (stricter than registration)
+  const isCentered = faceFound && (centerSkin / (centerData.length / 4)) > 0.22;
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  return { dataUrl, faceFound, isCentered };
+}
+
 
 function stopAll() {
   scanning = false;
