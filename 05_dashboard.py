@@ -1144,8 +1144,12 @@ async function startScanning() {
             list.prepend(item);
         }
       } else if (data.ok && data.name === "Unknown") {
-        document.getElementById('scan_status').textContent = '❌ Unknown Face (Score: ' + Math.round(data.conf) + ' / Needs < 110)';
+        document.getElementById('scan_status').textContent = 'Unknown Face (Score: ' + Math.round(data.conf) + ' / Needs < 150)';
         document.getElementById('scan_status').className = 'status-box error';
+        lastRecognized = "";
+      } else if (data.ok && data.name === null) {
+        document.getElementById('scan_status').textContent = 'Scanning... Look straight at camera';
+        document.getElementById('scan_status').className = 'status-box info';
         lastRecognized = "";
       } else if (!data.ok) {
         document.getElementById('scan_status').textContent = data.error;
@@ -1391,22 +1395,22 @@ def api_recognize(body_bytes):
         x, y, w, h = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0]
         face_cx = x + w // 2
         face_cy = y + h // 2
-        # Face center must be within 35% of frame center horizontally and 40% vertically
-        if abs(face_cx - fw // 2) > fw * 0.35 or abs(face_cy - fh // 2) > fh * 0.40:
+        # Face center must be within 45% of frame center horizontally and 50% vertically
+        if abs(face_cx - fw // 2) > fw * 0.45 or abs(face_cy - fh // 2) > fh * 0.50:
             return {"ok": True, "name": None}  # face is off-center / turned
 
         face_crop = cv2.resize(gray[y:y+h, x:x+w], (100, 100))
         
         label, conf = global_recognizer.predict(face_crop)
         
-        if conf < 100:
+        if conf < 150:
             name = global_names.get(label, "Unknown")
             if name != "Unknown":
                 from db import mark_attendance
                 mark_attendance(str(label), name)
-            return {"ok": True, "name": name, "conf": conf}
+            return {"ok": True, "name": name, "conf": round(conf, 1)}
         else:
-            return {"ok": True, "name": "Unknown", "conf": conf}
+            return {"ok": True, "name": "Unknown", "conf": round(conf, 1)}
             
     except Exception as e:
         return {"ok": False, "error": str(e)}
