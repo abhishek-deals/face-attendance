@@ -756,7 +756,7 @@ async function captureSinglePhoto(stepIndex) {
         showStatus('cam_status', instructions[stepIndex] + " - No face detected, please adjust position.", 'error');
       }
     } catch(e) { }
-    await sleep(300); // 300ms delay between frames
+    await sleep(50); // 50ms delay between frames (faster retries)
   }
 }
 
@@ -788,7 +788,7 @@ function captureFrame() {
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  return canvas.toDataURL('image/jpeg', 0.4);
 }
 
 function updateCamProgress(count) {
@@ -1063,7 +1063,7 @@ function captureFrame() {
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  return canvas.toDataURL('image/jpeg', 0.4);
 }
 
 async function startScanning() {
@@ -1109,8 +1109,8 @@ async function startScanning() {
       }
     } catch(e) {}
     
-    // Check twice a second
-    await new Promise(r => setTimeout(r, 500));
+    // Check rapidly
+    await new Promise(r => setTimeout(r, 100));
   }
 }
 
