@@ -1201,15 +1201,20 @@ async function startScanning() {
             lastRecognized = data.name;
             document.getElementById('scan_status').textContent = `\u2705 ${data.name} marked Present!`;
             document.getElementById('scan_status').className = 'status-box success';
-            
             const list = document.getElementById('recognized_list');
             const item = document.createElement('div');
             item.style = 'padding:10px;background:var(--card);border:1px solid var(--green);border-radius:8px;display:flex;justify-content:space-between;align-items:center';
             item.innerHTML = `<strong>${data.name}</strong><span class="pill present">Present</span>`;
             list.prepend(item);
         }
+      } else if (data.ok && data.pending) {
+        // Confirming face — show progress dots
+        const dots = '.'.repeat(data.frames || 1);
+        document.getElementById('scan_status').textContent = `\ud83d\udd0d Confirming: ${data.pending}${dots} (Score: ${data.conf})`;
+        document.getElementById('scan_status').className = 'status-box info';
+        lastRecognized = "";
       } else if (data.ok && data.name === "Unknown") {
-        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' / Needs < 150)';
+        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' / Needs < 80)';
         document.getElementById('scan_status').className = 'status-box error';
         lastRecognized = "";
       } else if (data.ok && data.name === null) {
