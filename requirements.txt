@@ -1,32 +1,16 @@
-# Face Attendance System — Working Requirements
-# Tested on: Python 3.13.3 / Windows 11 / AMD Athlon / 4GB RAM
-#
-# IMPORTANT: These are the EXACT versions confirmed working together.
-# The key constraint is NumPy >= 2 (required by Python 3.13).
-# opencv 4.8.x was compiled against NumPy 1.x — DO NOT use it with Python 3.13.
-#
-# ── INSTALL ONE BY ONE to avoid RAM overload ──────────────
-#
-#   pip install opencv-python
-#   pip install opencv-contrib-python
-#   pip install pandas
-#   pip install Pillow
-#   pip install openpyxl
-#
-# numpy and et-xmlfile install automatically as dependencies.
-# sqlite3 is built into Python — no install needed.
-#
-# DO NOT install: tensorflow, keras, torch, face_recognition, dlib, mediapipe
-# ──────────────────────────────────────────────────────────
+# Face Attendance System — Vercel Requirements
+# Registration: face detection done in browser (no OpenCV needed)
+# Training: uses Pillow + numpy (lightweight)
+# Recognition: uses OpenCV contrib for LBPH model (live attendance page)
 
-# Core OpenCV (must match versions — both must be same major.minor)
-opencv-contrib-python-headless>=4.9.0
+# OpenCV for training and live recognition
+opencv-contrib-python-headless==4.9.0.80
 
-# Scientific computing (NumPy >= 2 required for Python 3.13)
-numpy>=2.0.0
+# Scientific computing
+numpy>=1.24.0,<2.0.0
 
-# Data & reporting
+# Image processing (used during training)
 Pillow>=10.0.0
 
-# Vercel Deployment
+# Web framework
 Flask>=3.0.0

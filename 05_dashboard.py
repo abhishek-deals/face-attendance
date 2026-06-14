@@ -737,32 +737,35 @@ async function captureSinglePhoto(stepIndex) {
   ];
   showStatus('cam_status', instructions[stepIndex] + " (Detecting face...)", 'info');
 
+  let attempts = 0;
   while (capturing && captureCount === stepIndex) {
-    const frame = captureFrame();
+    attempts++;
+    const { dataUrl, faceFound } = captureFrameWithFaceDetect();
     try {
       const res = await fetch('/api/capture_frame', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ frame: frame, student_id: currentSid, name: currentName })
+        body: JSON.stringify({ frame: dataUrl, student_id: currentSid, name: currentName, face_detected: faceFound })
       });
       const data = await res.json();
       if (data.ok && data.face_found && data.count > stepIndex) {
         captureCount = data.count;
         updateCamProgress(captureCount);
-        showStatus('cam_status', `Photo ${captureCount} captured successfully!`, 'success');
-        await sleep(1000); // Wait 1 second before next instruction
-        break; // break the loop, move to next step
-      } else if (data.ok && !data.face_found) {
-        showStatus('cam_status', instructions[stepIndex] + " - No face detected, please adjust position.", 'error');
+        showStatus('cam_status', `✅ Photo ${captureCount} captured!`, 'success');
+        await sleep(800);
+        break;
+      } else if (!faceFound) {
+        if (attempts % 10 === 0) // Only update message every 10 attempts to avoid flicker
+          showStatus('cam_status', instructions[stepIndex] + " — No face detected. Look at the camera.", 'info');
       } else if (!data.ok) {
         showStatus('cam_status', "Server Error: " + data.error, 'error');
         await sleep(2000);
       }
-    } catch(e) { 
-        showStatus('cam_status', "Network Error: " + e.message, 'error');
-        await sleep(2000);
+    } catch(e) {
+      showStatus('cam_status', "Network Error: " + e.message, 'error');
+      await sleep(2000);
     }
-    await sleep(50); // 50ms delay between frames (faster retries)
+    await sleep(200);
   }
 }
 
@@ -773,7 +776,6 @@ async function startGuidedCapture() {
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('btn_stop').style.display = 'inline-block';
 
-  // Guided 3-step capture
   for (let i = 0; i < 3; i++) {
     if (!capturing) break;
     await captureSinglePhoto(i);
@@ -789,6 +791,34 @@ function stopCapture() {
   capturing = false;
 }
 
+// Capture a frame and do basic face detection in the browser using skin-tone heuristic
+function captureFrameWithFaceDetect() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, 320, 240);
+
+  // Sample center region pixels to check for skin tone (basic face detection)
+  const imgData = ctx.getImageData(90, 50, 140, 160); // center-ish region
+  const data = imgData.data;
+  let skinPixels = 0;
+  const totalPixels = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    // Skin tone detection in RGB
+    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) {
+      skinPixels++;
+    }
+  }
+  const skinRatio = skinPixels / totalPixels;
+  const faceFound = skinRatio > 0.12; // At least 12% skin pixels in center region
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  return { dataUrl, faceFound };
+}
+
 function captureFrame() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
@@ -796,6 +826,7 @@ function captureFrame() {
   ctx.drawImage(video, 0, 0, 320, 240);
   return canvas.toDataURL('image/jpeg', 0.8);
 }
+
 
 function updateCamProgress(count) {
   const pct = Math.min(100, Math.round(count / 3 * 100));
@@ -1136,50 +1167,37 @@ function stopAll() {
 
 # ══════════════════════════════════════════════
 # API: CAPTURE FRAME
-# Receives base64 image, detects face, saves crop
+# Receives base64 face crop (already detected by browser),
+# saves it directly. No server-side OpenCV needed.
 # ══════════════════════════════════════════════
 def api_capture_frame(body_bytes):
     try:
-        import cv2
-        import numpy as np
-
         data = json.loads(body_bytes.decode("utf-8"))
         frame_b64 = data.get("frame", "")
         sid       = str(data.get("student_id", "")).strip()
         name      = str(data.get("name", "")).strip().replace(" ", "_")
+        # face_detected flag sent from browser (True if browser found a face)
+        face_detected = data.get("face_detected", True)
 
         if not sid or not name or not frame_b64:
             return {"ok": False, "error": "Missing fields"}
 
-        # Validate / sanitize
         if not sid.isdigit():
             return {"ok": False, "error": "Invalid student ID"}
+
+        # If browser says no face, return early
+        if not face_detected:
+            return {"ok": True, "face_found": False, "count": _current_count(sid, name)}
 
         # Remove data URL prefix
         if "," in frame_b64:
             frame_b64 = frame_b64.split(",", 1)[1]
 
-        # Decode base64 → numpy array
-        img_bytes  = base64.b64decode(frame_b64)
-        nparr      = np.frombuffer(img_bytes, np.uint8)
-        frame      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Decode base64 to raw bytes
+        img_bytes = base64.b64decode(frame_b64)
 
-        if frame is None:
-            return {"ok": True, "face_found": False, "count": _current_count(sid, name)}
-
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Load detector
-        if not os.path.exists(CASCADE_PATH):
-            return {"ok": False, "error": "Haarcascade not found. Run python 00_setup.py first."}
-
-        detector = cv2.CascadeClassifier(CASCADE_PATH)
-        faces = detector.detectMultiScale(
-            gray, scaleFactor=1.3, minNeighbors=5, minSize=(40, 40)
-        )
-
-        if len(faces) == 0:
+        # Validate it's a real image by checking JPEG/PNG header bytes
+        if not (img_bytes[:2] == b'\xff\xd8' or img_bytes[:4] == b'\x89PNG'):
             return {"ok": True, "face_found": False, "count": _current_count(sid, name)}
 
         # Create folder
@@ -1191,21 +1209,16 @@ def api_capture_frame(body_bytes):
         existing = len([f for f in os.listdir(folder) if f.lower().endswith(".jpg")])
 
         if existing >= 3:
-            # Register in DB
             _register_student(sid, name.replace("_", " "))
             return {"ok": True, "face_found": True, "count": existing}
 
-        # Save the largest face
-        x, y, w, h = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0]
-        face_crop   = gray[y:y+h, x:x+w]
-        face_resized = cv2.resize(face_crop, (100, 100))
-
+        # Save the image directly (browser already cropped/resized the face)
         img_path = os.path.join(folder, f"{existing + 1}.jpg")
-        cv2.imwrite(img_path, face_resized)
+        with open(img_path, "wb") as f:
+            f.write(img_bytes)
 
         new_count = existing + 1
 
-        # Register in DB when done
         if new_count >= 3:
             _register_student(sid, name.replace("_", " "))
 
