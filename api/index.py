@@ -340,7 +340,7 @@ def api_delete_student():
         sid = str(data.get("student_id", "")).strip()
         pwd = data.get("password", "")
 
-        if pwd != "admin123":
+        if pwd != "vercel":
             return jsonify({"ok": False, "error": "Incorrect password!"})
         if not sid:
             return jsonify({"ok": False, "error": "Missing student ID"})
