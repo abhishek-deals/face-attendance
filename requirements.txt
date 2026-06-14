@@ -20,8 +20,8 @@
 # ──────────────────────────────────────────────────────────
 
 # Core OpenCV (must match versions — both must be same major.minor)
-opencv-python>=4.9.0
-opencv-contrib-python>=4.9.0
+opencv-python-headless>=4.9.0
+opencv-contrib-python-headless>=4.9.0
 
 # Scientific computing (NumPy >= 2 required for Python 3.13)
 numpy>=2.0.0
@@ -30,3 +30,6 @@ numpy>=2.0.0
 pandas>=2.0.0
 Pillow>=10.0.0
 openpyxl>=3.1.2
+
+# Vercel Deployment
+Flask>=3.0.0

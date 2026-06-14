@@ -25,12 +25,12 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-DB_PATH        = "attendance.db"
-ATTENDANCE_DIR = "attendance"
-DATASET_PATH   = "dataset"
-TRAINER_PATH   = "trainer"
-CASCADE_PATH   = os.path.join("haarcascade", "haarcascade_frontalface_default.xml")
-PORT           = 5000
+DB_PATH        = os.environ.get("DB_PATH", "attendance.db")
+ATTENDANCE_DIR = os.environ.get("ATTENDANCE_DIR", "attendance")
+DATASET_PATH   = os.environ.get("DATASET_PATH", "dataset")
+TRAINER_PATH   = os.environ.get("TRAINER_PATH", "trainer")
+CASCADE_PATH   = os.environ.get("CASCADE_PATH", os.path.join("haarcascade", "haarcascade_frontalface_default.xml"))
+PORT           = int(os.environ.get("PORT", 5000))
 
 # Global training status
 training_status = {"running": False, "done": False, "message": "", "students": []}
@@ -1550,7 +1550,7 @@ if __name__ == "__main__":
     os.makedirs(TRAINER_PATH, exist_ok=True)
     os.makedirs(ATTENDANCE_DIR, exist_ok=True)
 
-    server = HTTPServer(("localhost", PORT), AttendanceHandler)
+    server = HTTPServer(("0.0.0.0", PORT), AttendanceHandler)
 
     print()
     print("=" * 52)
@@ -1568,7 +1568,8 @@ if __name__ == "__main__":
     print("  Press Ctrl+C to stop.")
     print("=" * 52)
 
-    threading.Timer(1.2, lambda: webbrowser.open(f"http://localhost:{PORT}/register")).start()
+    # In a cloud environment, we do not want to try opening a local web browser
+    # threading.Timer(1.2, lambda: webbrowser.open(f"http://localhost:{PORT}/register")).start()
 
     try:
         server.serve_forever()

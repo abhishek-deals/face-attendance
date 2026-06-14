@@ -20,8 +20,8 @@ from datetime import datetime
 # Pandas is only imported where needed to save memory at startup
 # openpyxl is imported only inside export_excel()
 
-DB_PATH = "attendance.db"
-ATTENDANCE_DIR = "attendance"
+DB_PATH = os.environ.get("DB_PATH", "attendance.db")
+ATTENDANCE_DIR = os.environ.get("ATTENDANCE_DIR", "attendance")
 
 
 # ──────────────────────────────────────────────
