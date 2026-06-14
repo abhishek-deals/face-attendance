@@ -158,27 +158,27 @@ def mark_attendance(sid, name):
 # Returns today's attendance as a pandas DataFrame.
 # ──────────────────────────────────────────────
 def get_today_report():
-    """Fetch today's attendance records as a DataFrame."""
-    import pandas as pd  # Imported here to reduce startup RAM
-
+    """Fetch today's attendance records as a list of dicts."""
     conn = None
     try:
         conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         today = datetime.now().strftime("%Y-%m-%d")
 
-        df = pd.read_sql_query("""
+        cursor.execute("""
             SELECT student_id, name, date, time
             FROM attendance
             WHERE date = ?
             ORDER BY time ASC
-        """, conn, params=(today,))
+        """, (today,))
 
-        return df
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
 
     except Exception as e:
-        # Catches both sqlite3.Error and pandas errors
         print(f"[DB ERROR] get_today_report: {e}")
-        return pd.DataFrame()
+        return []
 
     finally:
         if conn:
@@ -191,25 +191,25 @@ def get_today_report():
 # Most recent dates/times shown first.
 # ──────────────────────────────────────────────
 def get_all_report():
-    """Fetch all attendance records ordered by newest first."""
-    import pandas as pd
-
+    """Fetch all attendance records ordered by newest first as a list of dicts."""
     conn = None
     try:
         conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-        df = pd.read_sql_query("""
+        cursor.execute("""
             SELECT student_id, name, date, time
             FROM attendance
             ORDER BY date DESC, time DESC
-        """, conn)
+        """)
 
-        return df
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
 
     except Exception as e:
-        # Catches both sqlite3.Error and pandas errors
         print(f"[DB ERROR] get_all_report: {e}")
-        return pd.DataFrame()
+        return []
 
     finally:
         if conn:
@@ -223,50 +223,9 @@ def get_all_report():
 # Returns the file path string on success.
 # ──────────────────────────────────────────────
 def export_excel(date=None):
-    """Export attendance report to Excel (.xlsx) file."""
-    import pandas as pd
-    # openpyxl is the engine used by pandas for xlsx
-
-    # Determine which date to export
-    if date is None:
-        date = datetime.now().strftime("%Y-%m-%d")
-
-    # Ensure output folder exists
-    os.makedirs(ATTENDANCE_DIR, exist_ok=True)
-
-    conn = None
-    try:
-        conn = sqlite3.connect(DB_PATH)
-
-        df = pd.read_sql_query("""
-            SELECT student_id AS "Student ID",
-                   name       AS "Name",
-                   date       AS "Date",
-                   time       AS "Time"
-            FROM attendance
-            WHERE date = ?
-            ORDER BY time ASC
-        """, conn, params=(date,))
-
-        if df.empty:
-            print(f"[EXPORT] No records found for date: {date}")
-            return None
-
-        file_path = os.path.join(ATTENDANCE_DIR, f"report_{date}.xlsx")
-
-        # Write Excel using openpyxl engine
-        df.to_excel(file_path, index=False, engine="openpyxl")
-
-        print(f"[EXPORT] Saved: {file_path} ({len(df)} records)")
-        return file_path
-
-    except Exception as e:
-        print(f"[DB ERROR] export_excel: {e}")
-        return None
-
-    finally:
-        if conn:
-            conn.close()
+    """Export attendance report to Excel (.xlsx) file. 
+    (Disabled on Vercel to save space, uses export_csv instead)"""
+    return export_csv(date)
 
 
 # ──────────────────────────────────────────────
