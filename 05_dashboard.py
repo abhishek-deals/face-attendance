@@ -729,23 +729,28 @@ function stopCamera() {
   document.getElementById('btn_capture').style.display = 'none';
 }
 
-async function captureStraightPhoto() {
-  showStatus('cam_status', '📸 Look STRAIGHT at the camera — detecting face...', 'info');
+async function captureStraightPhoto(photoIndex) {
+  const msgs = [
+    '📸 Photo 1 of 3 — Look STRAIGHT at the camera',
+    '📸 Photo 2 of 3 — Hold still, STRAIGHT face',
+    '📸 Photo 3 of 3 — Almost done! Keep STRAIGHT'
+  ];
+  showStatus('cam_status', msgs[photoIndex] + ' (detecting face...)', 'info');
 
   let attempts = 0;
-  while (capturing && captureCount === 0) {
+  while (capturing && captureCount === photoIndex) {
     attempts++;
     const { dataUrl, faceFound, isCentered } = captureFrameWithFaceDetect();
-    
+
     if (!faceFound) {
       if (attempts % 8 === 0)
-        showStatus('cam_status', '❌ No face detected — look straight at the camera.', 'info');
+        showStatus('cam_status', msgs[photoIndex] + ' — No face detected. Look straight at the camera.', 'info');
       await sleep(200);
       continue;
     }
     if (!isCentered) {
       if (attempts % 8 === 0)
-        showStatus('cam_status', '⚠️ Face not centered — move closer and look straight.', 'info');
+        showStatus('cam_status', msgs[photoIndex] + ' — Face not centered. Move closer and look straight.', 'info');
       await sleep(200);
       continue;
     }
@@ -757,11 +762,11 @@ async function captureStraightPhoto() {
         body: JSON.stringify({ frame: dataUrl, student_id: currentSid, name: currentName, face_detected: true })
       });
       const data = await res.json();
-      if (data.ok && data.face_found) {
+      if (data.ok && data.face_found && data.count > photoIndex) {
         captureCount = data.count;
         updateCamProgress(captureCount);
-        showStatus('cam_status', '✅ Photo captured! Student registered successfully.', 'success');
-        await sleep(800);
+        showStatus('cam_status', `✅ Photo ${captureCount} of 3 captured!`, 'success');
+        await sleep(1200); // 1.2s pause between photos
         break;
       } else if (!data.ok) {
         showStatus('cam_status', 'Server Error: ' + data.error, 'error');
@@ -782,12 +787,15 @@ async function startGuidedCapture() {
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('btn_stop').style.display = 'inline-block';
 
-  await captureStraightPhoto();
+  for (let i = 0; i < 3; i++) {
+    if (!capturing) break;
+    await captureStraightPhoto(i);
+  }
 
   capturing = false;
   document.getElementById('btn_stop').style.display = 'none';
-  if (captureCount >= 1) { onCaptureDone(); }
-  else { showStatus('cam_status', 'Capture stopped. No photo saved.', 'info'); }
+  if (captureCount >= 3) { onCaptureDone(); }
+  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' of 3 photos saved.', 'info'); }
 }
 
 function stopCapture() {
@@ -803,17 +811,15 @@ function captureFrameWithFaceDetect() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
 
-  // Check FULL frame for any skin pixels
   const fullData = ctx.getImageData(0, 0, 320, 240).data;
   let totalSkin = 0;
   for (let i = 0; i < fullData.length; i += 4) {
     const r = fullData[i], g = fullData[i+1], b = fullData[i+2];
     if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) totalSkin++;
   }
-  const totalPixels = (fullData.length / 4);
+  const totalPixels = fullData.length / 4;
   const faceFound = (totalSkin / totalPixels) > 0.05;
 
-  // Check CENTER region — more skin here means face is centered/straight
   const cx = 100, cy = 50, cw = 120, ch = 140;
   const centerData = ctx.getImageData(cx, cy, cw, ch).data;
   let centerSkin = 0;
@@ -822,7 +828,6 @@ function captureFrameWithFaceDetect() {
     if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) centerSkin++;
   }
   const centerTotal = centerData.length / 4;
-  // Face is "centered" if more than 20% of the center region is skin
   const isCentered = faceFound && (centerSkin / centerTotal) > 0.20;
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
@@ -838,15 +843,15 @@ function captureFrame() {
 }
 
 function updateCamProgress(count) {
-  const pct = count >= 1 ? 100 : 0;
+  const pct = Math.min(100, Math.round(count / 3 * 100));
   document.getElementById('progress_fill').style.width = pct + '%';
-  document.getElementById('progress_text').textContent = count >= 1 ? '1 of 1 photo captured' : '0 of 1 photo captured';
-  document.getElementById('cam_count').textContent = count + ' / 1';
+  document.getElementById('progress_text').textContent = count + ' of 3 photos captured';
+  document.getElementById('cam_count').textContent = count + ' / 3';
 }
 
 function onCaptureDone() {
   stopCamera();
-  showStatus('cam_status', '✅ Straight face photo captured! Student registered.', 'success');
+  showStatus('cam_status', '✅ All 3 photos captured! Student registered successfully.', 'success');
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('done_section').style.display = 'block';
 }
@@ -1221,7 +1226,7 @@ def api_capture_frame(body_bytes):
         # Count existing images
         existing = len([f for f in os.listdir(folder) if f.lower().endswith(".jpg")])
 
-        if existing >= 1:
+        if existing >= 3:
             _register_student(sid, name.replace("_", " "))
             return {"ok": True, "face_found": True, "count": existing}
 
@@ -1232,7 +1237,7 @@ def api_capture_frame(body_bytes):
 
         new_count = existing + 1
 
-        if new_count >= 1:
+        if new_count >= 3:
             _register_student(sid, name.replace("_", " "))
 
         return {"ok": True, "face_found": True, "count": new_count}
