@@ -1524,7 +1524,7 @@ def api_delete_student(body_bytes):
         sid = str(data.get("student_id", "")).strip()
         pwd = data.get("password", "")
         
-        if pwd != "admin123":
+        if pwd != "vercel":
             return {"ok": False, "error": "Incorrect password!"}
             
         if not sid:
