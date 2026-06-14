@@ -754,8 +754,14 @@ async function captureSinglePhoto(stepIndex) {
         break; // break the loop, move to next step
       } else if (data.ok && !data.face_found) {
         showStatus('cam_status', instructions[stepIndex] + " - No face detected, please adjust position.", 'error');
+      } else if (!data.ok) {
+        showStatus('cam_status', "Server Error: " + data.error, 'error');
+        await sleep(2000);
       }
-    } catch(e) { }
+    } catch(e) { 
+        showStatus('cam_status', "Network Error: " + e.message, 'error');
+        await sleep(2000);
+    }
     await sleep(50); // 50ms delay between frames (faster retries)
   }
 }
@@ -788,7 +794,7 @@ function captureFrame() {
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
-  return canvas.toDataURL('image/jpeg', 0.4);
+  return canvas.toDataURL('image/jpeg', 0.8);
 }
 
 function updateCamProgress(count) {
@@ -1063,7 +1069,7 @@ function captureFrame() {
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
-  return canvas.toDataURL('image/jpeg', 0.4);
+  return canvas.toDataURL('image/jpeg', 0.8);
 }
 
 async function startScanning() {
