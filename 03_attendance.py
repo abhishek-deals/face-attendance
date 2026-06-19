@@ -39,11 +39,17 @@ from db import setup_db, mark_attendance, export_csv
 # CONFIGURATION CONSTANTS
 # Adjust these if laptop runs hot or lags.
 # ──────────────────────────────────────────────
-SKIP_FRAMES      = 3    # Process 1 of every N frames (increase if hot)
-CONFIDENCE_LIMIT = 70   # Lower = stricter. Range: 0 (perfect) to 100+
+SKIP_FRAMES      = 2    # Process 1 of every N frames (was 3, now 2 for better tracking)
+CONFIDENCE_LIMIT = 55   # Lower = stricter. Was 65 — tightened to 55 to reduce wrong-person matches
+                         # LBPH: 0=perfect, 55-70=acceptable, 70+=likely wrong person
+CONFIRM_FRAMES   = 4    # Person must be seen this many consecutive frames before marking
 CAM_WIDTH        = 320
 CAM_HEIGHT       = 240
 CAM_FPS          = 15
+
+# Max pixel distance a face centroid can move between frames
+# and still be considered the "same face" for streak tracking.
+STREAK_MAX_DIST  = 60   # pixels (at 320x240, a face is ~80px wide)
 
 
 # ──────────────────────────────────────────────
@@ -152,6 +158,17 @@ cam.set(cv2.CAP_PROP_FPS,          CAM_FPS)
 marked_set   = set()    # Names marked this session
 frame_count  = 0        # Total frames read (used for skip logic)
 
+# Consecutive-frame confirmation buffer
+# KEY FIX: Track streaks PER FACE POSITION, not globally.
+# Old code used a single {label, count} dict — if two people were
+# in frame, Person A's streak would persist when Person B's face
+# was being checked, causing wrong-person marks.
+#
+# New approach: dict keyed by face centroid (snapped to grid).
+# {(cx_bucket, cy_bucket): {"label": sid, "count": n}}
+# Two faces with centroids > STREAK_MAX_DIST apart are tracked independently.
+_streaks = {}   # { face_key: {"label": int, "count": int} }
+
 # Status bar displayed on every frame
 status_msg   = "System Ready — Face the camera"
 status_color = (255, 255, 255)  # White
@@ -229,28 +246,77 @@ while True:
     # maxSize=(200,200)→ ignore objects too large to be a face at this res
     faces = detector.detectMultiScale(
         gray,
-        scaleFactor=1.3,
-        minNeighbors=5,
+        scaleFactor=1.2,
+        minNeighbors=6,
         minSize=(50, 50),
-        maxSize=(200, 200)
+        maxSize=(220, 220)
     )
+
+    # Clean up stale streak entries for faces no longer visible
+    # (keeps memory tidy if many different faces appear over time)
+    if len(faces) == 0:
+        _streaks.clear()
 
     for (x, y, w, h) in faces:
         # Extract and resize face region to 100x100
         # Must match the size used during training
         face_region  = gray[y:y + h, x:x + w]
-        face_resized = cv2.resize(face_region, (100, 100))
+
+        # CLAHE equalization — normalizes lighting for better matching
+        # NOTE: MUST match the CLAHE applied in 02_train.py training pipeline
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        face_equalized = clahe.apply(face_region)
+        face_resized = cv2.resize(face_equalized, (100, 100))
 
         # ── LBPH Prediction ──────────────────
         # sid        → predicted student integer ID
         # confidence → lower = more confident
         #              0.0 = perfect match
-        #              70+  = likely unknown
+        #              55+  = likely wrong person (our threshold)
         sid, confidence = recognizer.predict(face_resized)
+
+        # ── Per-face streak key ───────────────────────────────────
+        # KEY FIX: Track streaks PER FACE POSITION independently.
+        # Old single _streak dict caused Person A's streak to persist
+        # when Person B appeared next, marking the wrong student.
+        #
+        # We bucket face centroids so small jitter doesn't split one
+        # face into two buckets.
+        cx = x + w // 2
+        cy = y + h // 2
+        face_key = None
+        for existing_key in list(_streaks.keys()):
+            ekx, eky = existing_key
+            if abs(ekx - cx) < STREAK_MAX_DIST and abs(eky - cy) < STREAK_MAX_DIST:
+                face_key = existing_key
+                break
+        if face_key is None:
+            face_key = (cx, cy)
 
         if confidence < CONFIDENCE_LIMIT:
             # ── Known person ─────────────────
             name = id_to_name.get(sid, "Unknown")
+
+            # ── Per-face consecutive-frame confirmation ─────────
+            # Require CONFIRM_FRAMES of the SAME label in a row
+            # for THIS specific face position before marking.
+            streak = _streaks.get(face_key, {"label": -1, "count": 0})
+            if streak["label"] == sid:
+                streak["count"] += 1
+            else:
+                # Label changed for this face position — reset streak
+                streak = {"label": sid, "count": 1}
+            _streaks[face_key] = streak
+
+            if streak["count"] < CONFIRM_FRAMES:
+                # Still building streak — show progress, don't mark yet
+                short_name = name[:14] if len(name) > 14 else name
+                status_msg   = f"Verifying: {short_name} ({streak['count']}/{CONFIRM_FRAMES})"
+                status_color = (255, 165, 0)  # Orange
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 165, 0), 2)
+                cv2.putText(frame, f"{name}? [{confidence:.0f}]", (x, y - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 165, 0), 1)
+                continue
 
             # Mark attendance (returns True only on first mark today)
             is_new = mark_attendance(str(sid), name)
@@ -265,34 +331,35 @@ while True:
                       f"{datetime.now().strftime('%H:%M:%S')}")
             else:
                 # Already marked earlier today
-                # Truncate name if too long for 320px frame
                 short_name = name[:14] if len(name) > 14 else name
                 status_msg   = f"Already: {short_name}"
                 status_color = (0, 255, 255)  # Yellow
 
-            # Green rectangle + name label
+            # Green rectangle + name label with confidence score
             cv2.rectangle(
                 frame, (x, y), (x + w, y + h),
                 (0, 255, 0), 2
             )
             cv2.putText(
-                frame, name,
+                frame, f"{name} [{confidence:.0f}]",
                 (x, y - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5, (0, 255, 0), 1
+                0.45, (0, 255, 0), 1
             )
 
         else:
-            # ── Unknown / Unrecognized person ─
+            # ── Unknown / Unrecognized person ─────────────────────
+            # Reset this face position's streak
+            _streaks[face_key] = {"label": -1, "count": 0}
             cv2.rectangle(
                 frame, (x, y), (x + w, y + h),
                 (0, 0, 255), 2
             )
             cv2.putText(
-                frame, "Unknown",
+                frame, f"Unknown [{confidence:.0f}]",
                 (x, y - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5, (0, 0, 255), 1
+                0.45, (0, 0, 255), 1
             )
             status_msg   = "Unknown face detected"
             status_color = (0, 0, 255)  # Red

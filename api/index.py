@@ -124,9 +124,8 @@ def api_capture_frame():
             count = pstore.get_face_photo_count(sid)
             return jsonify({"ok": True, "face_found": False, "count": count})
 
-        # Convert to grayscale and equalise histogram for better matching
+        # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.equalizeHist(gray)  # normalise brightness
 
         # Detect face with haarcascade
         cascade_path = os.environ.get("CASCADE_PATH", "")
@@ -149,19 +148,20 @@ def api_capture_frame():
         face_bytes = face_encoded.tobytes()
 
         # Check how many photos already stored
+        TARGET_PHOTOS = 8
         existing = pstore.get_face_photo_count(sid)
-        if existing >= 3:
+        if existing >= TARGET_PHOTOS:
             pstore.add_student(sid, name.replace("_", " "))
-            return jsonify({"ok": True, "face_found": True, "count": existing})
+            return jsonify({"ok": True, "face_found": True, "count": existing, "target": TARGET_PHOTOS})
 
-        # Save the face CROP (not the full frame) to persistent DB
+        # Save the face CROP (not the too large full frame) to persistent DB
         pstore.save_face_photo(sid, existing + 1, face_bytes)
         new_count = existing + 1
 
-        if new_count >= 3:
+        if new_count >= TARGET_PHOTOS:
             pstore.add_student(sid, name.replace("_", " "))
 
-        return jsonify({"ok": True, "face_found": True, "count": new_count})
+        return jsonify({"ok": True, "face_found": True, "count": new_count, "target": TARGET_PHOTOS})
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -187,6 +187,29 @@ def api_train():
             radius=1, neighbors=8, grid_x=8, grid_y=8
         )
 
+        # Inline augmentation helper
+        # Each real photo generates ~11 variants so 8 photos
+        # -> 88 training samples, matching 50+ manual captures.
+        def _augment(img):
+            variants = [img]
+            h, w = img.shape
+            ctr = (w // 2, h // 2)
+            for f in [0.70, 0.85, 1.15, 1.30]:
+                variants.append(
+                    np.clip(img.astype(np.float32) * f, 0, 255).astype(np.uint8)
+                )
+            for ang in [-10, -5, 5, 10]:
+                M = cv2.getRotationMatrix2D(ctr, ang, 1.0)
+                variants.append(
+                    cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                )
+            variants.append(cv2.flip(img, 1))
+            noise = np.random.normal(0, 8, img.shape).astype(np.int16)
+            variants.append(
+                np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+            )
+            return variants  # 11 variants
+
         face_samples = []
         ids = []
         id_name_map = {}
@@ -198,10 +221,14 @@ def api_train():
                 # Open as grayscale and resize to 100x100 for consistency
                 pil_img = Image.open(io.BytesIO(photo_bytes)).convert("L").resize((100, 100))
                 img_array = np.array(pil_img, dtype="uint8")
-                # Apply histogram equalisation so lighting differences don't confuse the model
-                img_array = cv2.equalizeHist(img_array)
-                face_samples.append(img_array)
-                ids.append(sid_int)
+                # Apply CLAHE so lighting differences don't confuse the model
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                img_array = clahe.apply(img_array)
+                
+                # Apply data augmentation
+                for variant in _augment(img_array):
+                    face_samples.append(variant)
+                    ids.append(sid_int)
             except Exception:
                 pass
 
@@ -236,7 +263,9 @@ def api_train():
 
 _recognizer_cache = None
 _names_cache = None
-_confirm_buffer = {}   # track consecutive matches per face label
+_confirm_buffer = {}   # {client_ip: {"label": int, "count": int, "conf_sum": float}}
+_CONFIRM_FRAMES = 6    # Must see same person this many frames in a row
+_CONFIDENCE_THRESHOLD = 55  # LBPH: lower = better match. Reject anything >= this.
 
 @app.route('/api/recognize', methods=['POST'])
 def api_recognize():
@@ -244,6 +273,11 @@ def api_recognize():
     try:
         import cv2
         import numpy as np
+
+        # Get client IP for buffering
+        client_key = request.headers.get('x-forwarded-for', request.remote_addr)
+        if not client_key:
+            client_key = "default"
 
         # Load model from persistent DB if not cached
         if _recognizer_cache is None:
@@ -271,11 +305,11 @@ def api_recognize():
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if frame is None:
+            _confirm_buffer.pop(client_key, None)
             return jsonify({"ok": True, "name": None})
 
-        # Grayscale + histogram equalise (must match training preprocessing)
+        # Grayscale (must match training preprocessing)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.equalizeHist(gray)
 
         cascade_path = os.environ.get("CASCADE_PATH", "")
         detector = cv2.CascadeClassifier(cascade_path)
@@ -286,7 +320,7 @@ def api_recognize():
         )
 
         if len(faces) == 0:
-            _confirm_buffer = {}
+            _confirm_buffer.pop(client_key, None)
             return jsonify({"ok": True, "name": None})
 
         # Largest face, centered check
@@ -294,35 +328,50 @@ def api_recognize():
         x, y, w, h = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0]
         face_cx = x + w // 2
         face_cy = y + h // 2
-        if abs(face_cx - fw // 2) > fw * 0.45 or abs(face_cy - fh // 2) > fh * 0.50:
-            _confirm_buffer = {}
+        if abs(face_cx - fw // 2) > fw * 0.40 or abs(face_cy - fh // 2) > fh * 0.45:
+            _confirm_buffer.pop(client_key, None)
             return jsonify({"ok": True, "name": None})
 
         face_crop = cv2.resize(gray[y:y+h, x:x+w], (100, 100))
+        # Match api_train: apply CLAHE on the resized crop
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        face_crop = clahe.apply(face_crop)
         label, conf = _recognizer_cache.predict(face_crop)
 
-        # Tighter threshold: 80 works well for proper face crops with equalisation
-        if conf < 80:
-            name = _names_cache.get(label, "Unknown")
-            if name != "Unknown":
-                # Require 3 consecutive matching frames before marking attendance
-                _confirm_buffer[label] = _confirm_buffer.get(label, 0) + 1
-                # Reset other labels
-                for k in list(_confirm_buffer.keys()):
-                    if k != label:
-                        _confirm_buffer[k] = 0
-
-                if _confirm_buffer[label] >= 3:
-                    pstore.mark_attendance(str(label), name)
-                    return jsonify({"ok": True, "name": name, "conf": round(conf, 1), "confirmed": True})
-                else:
-                    # Not confirmed yet — show as scanning
-                    return jsonify({"ok": True, "name": None, "pending": name,
-                                    "frames": _confirm_buffer[label], "conf": round(conf, 1)})
-            return jsonify({"ok": True, "name": name, "conf": round(conf, 1)})
-        else:
-            _confirm_buffer = {}
+        # Confidence gate: reject poor matches
+        if conf >= _CONFIDENCE_THRESHOLD:
+            _confirm_buffer.pop(client_key, None)
             return jsonify({"ok": True, "name": "Unknown", "conf": round(conf, 1)})
+
+        # Multi-frame confirmation buffer
+        buf = _confirm_buffer.get(client_key, {"label": -1, "count": 0, "conf_sum": 0.0})
+
+        if buf["label"] == label:
+            buf["count"] += 1
+            buf["conf_sum"] += conf
+        else:
+            buf = {"label": label, "count": 1, "conf_sum": conf}
+
+        _confirm_buffer[client_key] = buf
+
+        name = _names_cache.get(label, "Unknown")
+        avg_conf = round(buf["conf_sum"] / buf["count"], 1)
+
+        if buf["count"] < _CONFIRM_FRAMES:
+            return jsonify({
+                "ok": True,
+                "name": None,
+                "pending": name,
+                "frames": buf["count"],
+                "needed": _CONFIRM_FRAMES,
+                "conf": avg_conf
+            })
+
+        # Confirmed! Mark attendance
+        _confirm_buffer.pop(client_key, None)
+        if name != "Unknown":
+            pstore.mark_attendance(str(label), name)
+        return jsonify({"ok": True, "name": name, "conf": avg_conf, "confirmed": True})
 
     except Exception as e:
         _recognizer_cache = None

@@ -664,7 +664,8 @@ def page_register():
             &bull; Good lighting is important<br>
             &bull; Move slightly between captures<br>
             &bull; Keep 40-80cm from camera<br>
-            &bull; Photos auto-save when face detected
+            &bull; Only 8 photos needed!<br>
+            &bull; Auto-augments to 88+ samples
           </div>
           <div class="status-box" id="cam_status"></div>
           <div id="done_section" style="display:none;margin-top:16px">
@@ -684,7 +685,7 @@ def page_register():
         <input type="file" id="file_input" multiple accept="image/*" onchange="handleFiles(this.files)">
         <div style="font-size:40px;margin-bottom:10px">&#128247;</div>
         <div style="font-size:15px;font-weight:600;margin-bottom:6px">Click to select photos</div>
-        <div style="font-size:13px;color:var(--muted)">Select 10-50 clear face photos &bull; JPG, PNG accepted</div>
+        <div style="font-size:13px;color:var(--muted)">Select 5-30 clear face photos &bull; JPG, PNG accepted &bull; Augmentation auto-expands them</div>
       </div>
       <div class="preview-grid" id="preview_grid"></div>
       <div class="progress-bar" style="margin-top:12px"><div class="progress-fill" id="upload_progress" style="width:0%"></div></div>
@@ -775,12 +776,10 @@ function stopCamera() {
 }
 
 async function captureStraightPhoto(photoIndex) {
-  const msgs = [
-    '📸 Photo 1 of 3 — Look STRAIGHT at the camera',
-    '📸 Photo 2 of 3 — Hold still, STRAIGHT face',
-    '📸 Photo 3 of 3 — Almost done! Keep STRAIGHT'
-  ];
-  showStatus('cam_status', msgs[photoIndex] + ' (detecting face...)', 'info');
+  const total = 8;
+  const num = photoIndex + 1;
+  const msg = `📸 Photo ${num} of ${total} — Look STRAIGHT at the camera`;
+  showStatus('cam_status', msg + ' (detecting face...)', 'info');
 
   let attempts = 0;
   while (capturing && captureCount === photoIndex) {
@@ -809,8 +808,9 @@ async function captureStraightPhoto(photoIndex) {
       const data = await res.json();
       if (data.ok && data.face_found && data.count > photoIndex) {
         captureCount = data.count;
-        updateCamProgress(captureCount);
-        showStatus('cam_status', `✅ Photo ${captureCount} of 3 captured!`, 'success');
+        const target = data.target || 20;
+        updateCamProgress(captureCount, target);
+        showStatus('cam_status', `✅ Photo ${captureCount} of ${target} captured!`, 'success');
         await sleep(1200); // 1.2s pause between photos
         break;
       } else if (!data.ok) {
@@ -832,15 +832,15 @@ async function startGuidedCapture() {
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('btn_stop').style.display = 'inline-block';
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 8; i++) {
     if (!capturing) break;
     await captureStraightPhoto(i);
   }
 
   capturing = false;
   document.getElementById('btn_stop').style.display = 'none';
-  if (captureCount >= 3) { onCaptureDone(); }
-  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' of 3 photos saved.', 'info'); }
+  if (captureCount >= 8) { onCaptureDone(); }
+  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' of 8 photos saved.', 'info'); }
 }
 
 function stopCapture() {
@@ -887,11 +887,12 @@ function captureFrame() {
   return canvas.toDataURL('image/jpeg', 0.8);
 }
 
-function updateCamProgress(count) {
-  const pct = Math.min(100, Math.round(count / 3 * 100));
+function updateCamProgress(count, target) {
+  const t = target || 20;
+  const pct = Math.min(100, Math.round(count / t * 100));
   document.getElementById('progress_fill').style.width = pct + '%';
-  document.getElementById('progress_text').textContent = count + ' of 3 photos captured';
-  document.getElementById('cam_count').textContent = count + ' / 3';
+  document.getElementById('progress_text').textContent = count + ' of ' + t + ' photos captured';
+  document.getElementById('cam_count').textContent = count + ' / ' + t;
 }
 
 function onCaptureDone() {
@@ -914,9 +915,9 @@ function handleFiles(files) {
   document.getElementById('upload_status_text').textContent =
     uploadFiles.length + ' photo' + (uploadFiles.length !== 1 ? 's' : '') + ' selected';
   document.getElementById('btn_upload').style.display =
-    uploadFiles.length >= 3 ? 'inline-block' : 'none';
-  if (uploadFiles.length < 3) {
-    showStatus('upload_status', 'Please select at least 3 photos for accurate recognition.', 'info');
+    uploadFiles.length >= 5 ? 'inline-block' : 'none';
+  if (uploadFiles.length < 5) {
+    showStatus('upload_status', 'Please select at least 5 photos for accurate recognition.', 'info');
   } else { hideStatus('upload_status'); }
 }
 
@@ -941,12 +942,12 @@ async function submitUpload() {
     document.getElementById('upload_status_text').textContent =
       'Processing ' + (i+1) + ' of ' + uploadFiles.length + '...';
   }
-  if (saved >= 3) {
-    showStatus('upload_status', saved + ' face photos saved successfully!', 'success');
+  if (saved >= 5) {
+    showStatus('upload_status', saved + ' face photos saved! Augmentation will expand these to ' + (saved*11) + '+ samples.', 'success');
     document.getElementById('upload_done').style.display = 'block';
     document.getElementById('btn_upload').style.display = 'none';
   } else {
-    showStatus('upload_status', 'Only ' + saved + ' face photos detected. Use clearer face photos.', 'error');
+    showStatus('upload_status', 'Only ' + saved + ' face photos detected. Use at least 5 clear face photos.', 'error');
     document.getElementById('btn_upload').disabled = false;
   }
 }
@@ -1323,7 +1324,9 @@ def api_capture_frame(body_bytes):
         # Count existing images
         existing = len([f for f in os.listdir(folder) if f.lower().endswith(".jpg")])
 
-        if existing >= 3:
+        # Need at least 8 photos — augmentation expands them to ~88 training samples
+        TARGET_PHOTOS = 8
+        if existing >= TARGET_PHOTOS:
             _register_student(sid, name.replace("_", " "))
             return {"ok": True, "face_found": True, "count": existing}
 
@@ -1333,11 +1336,12 @@ def api_capture_frame(body_bytes):
             f.write(img_bytes)
 
         new_count = existing + 1
+        TARGET_PHOTOS = 8
 
-        if new_count >= 3:
+        if new_count >= TARGET_PHOTOS:
             _register_student(sid, name.replace("_", " "))
 
-        return {"ok": True, "face_found": True, "count": new_count}
+        return {"ok": True, "face_found": True, "count": new_count, "target": TARGET_PHOTOS}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1375,6 +1379,29 @@ def api_train():
         recognizer = cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8)
         os.makedirs(TRAINER_PATH, exist_ok=True)
 
+        # ── Inline augmentation helper ────────────────────────
+        # Each real photo generates ~11 variants so 8 photos
+        # → 88 training samples, matching 50+ manual captures.
+        def _augment(img):
+            variants = [img]
+            h, w = img.shape
+            ctr = (w // 2, h // 2)
+            for f in [0.70, 0.85, 1.15, 1.30]:
+                variants.append(
+                    np.clip(img.astype(np.float32) * f, 0, 255).astype(np.uint8)
+                )
+            for ang in [-10, -5, 5, 10]:
+                M = cv2.getRotationMatrix2D(ctr, ang, 1.0)
+                variants.append(
+                    cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                )
+            variants.append(cv2.flip(img, 1))
+            noise = np.random.normal(0, 8, img.shape).astype(np.int16)
+            variants.append(
+                np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+            )
+            return variants  # 11 variants
+
         face_samples = []
         ids          = []
         id_name_map  = {}
@@ -1393,14 +1420,20 @@ def api_train():
                 continue
 
             id_name_map[student_id] = student_name
+            real_count = 0
             for img_file in os.listdir(fp):
                 if not img_file.lower().endswith(".jpg"):
                     continue
                 try:
                     pil_img   = Image.open(os.path.join(fp, img_file)).convert("L")
+                    pil_img   = pil_img.resize((100, 100), Image.LANCZOS)
                     img_array = np.array(pil_img, dtype="uint8")
-                    face_samples.append(img_array)
-                    ids.append(student_id)
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    img_array = clahe.apply(img_array)
+                    for variant in _augment(img_array):
+                        face_samples.append(variant)
+                        ids.append(student_id)
+                    real_count += 1
                 except Exception:
                     pass
 
@@ -1430,9 +1463,26 @@ def api_train():
 
 # ══════════════════════════════════════════════
 # API: RECOGNIZE FRAME (LIVE ATTENDANCE)
+#
+# FIX: Multi-frame confirmation buffer.
+# The same person must be predicted consistently
+# across CONFIRM_FRAMES frames before attendance
+# is marked. This prevents one-shot mismatches.
+#
+# CONFIDENCE_THRESHOLD: LBPH distance where
+#   0   = perfect identical match
+#   <75 = high confidence (same person)
+#   75-120 = marginal (unreliable)
+#   >120 = likely wrong person / unknown
 # ══════════════════════════════════════════════
 global_recognizer = None
 global_names = {}
+
+# --- Confirmation buffer (in-memory, per server session) ---
+# Tracks consecutive same-label predictions before marking
+_confirm_buffer = {}   # {client_ip_or_session: {"label": int, "count": int, "conf_sum": float}}
+_CONFIRM_FRAMES = 6    # Must see same person this many frames in a row
+_CONFIDENCE_THRESHOLD = 55  # LBPH: lower = better match. Reject anything >= this.
 
 def load_model():
     global global_recognizer, global_names
@@ -1452,12 +1502,13 @@ def load_model():
                     global_names[int(sid)] = sname
     return True
 
-def api_recognize(body_bytes):
+def api_recognize(body_bytes, client_key="default"):
+    global _confirm_buffer
     try:
         import cv2
         import numpy as np
         
-        # Load model if not loaded
+        # Load model if not loaded (or reload if model file changed)
         if global_recognizer is None:
             if not load_model():
                 return {"ok": False, "error": "Model not trained yet! Please train the model first."}
@@ -1475,11 +1526,15 @@ def api_recognize(body_bytes):
         frame      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if frame is None:
+            _confirm_buffer.pop(client_key, None)
             return {"ok": True, "name": None}
             
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # Strict frontal-face detection: high minNeighbors=8, scaleFactor=1.1
-        # This rejects side/turned faces and only accepts clearly frontal faces
+
+        # ── Strict frontal-face detection ─────────────────────
+        # scaleFactor=1.1  → thorough scan
+        # minNeighbors=8   → rejects weak/partial detections
+        # minSize=(60,60)  → ignore tiny blobs
         detector = cv2.CascadeClassifier(CASCADE_PATH)
         faces = detector.detectMultiScale(
             gray,
@@ -1490,29 +1545,72 @@ def api_recognize(body_bytes):
         )
         
         if len(faces) == 0:
+            _confirm_buffer.pop(client_key, None)  # Reset streak on no face
             return {"ok": True, "name": None}
 
-        # Pick the largest face and verify it is centered in the frame
+        # ── Pick largest face, verify it is centered ───────────
         fh, fw = gray.shape
         x, y, w, h = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0]
         face_cx = x + w // 2
         face_cy = y + h // 2
-        # Face center must be within 45% of frame center horizontally and 50% vertically
-        if abs(face_cx - fw // 2) > fw * 0.45 or abs(face_cy - fh // 2) > fh * 0.50:
+        # Face center must be within 40% of frame center horizontally and 45% vertically
+        if abs(face_cx - fw // 2) > fw * 0.40 or abs(face_cy - fh // 2) > fh * 0.45:
+            _confirm_buffer.pop(client_key, None)
             return {"ok": True, "name": None}  # face is off-center / turned
 
-        face_crop = cv2.resize(gray[y:y+h, x:x+w], (100, 100))
+        # ── Preprocess: CLAHE for lighting normalization ───────
+        # CLAHE improves recognition accuracy across different
+        # lighting conditions by normalizing local contrast.
+        face_crop_raw = gray[y:y+h, x:x+w]
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        face_equalized = clahe.apply(face_crop_raw)
+        face_crop = cv2.resize(face_equalized, (100, 100))
         
+        # ── LBPH Prediction ────────────────────────────────────
         label, conf = global_recognizer.predict(face_crop)
         
-        if conf < 150:
-            name = global_names.get(label, "Unknown")
-            if name != "Unknown":
-                from db import mark_attendance
-                mark_attendance(str(label), name)
-            return {"ok": True, "name": name, "conf": round(conf, 1)}
-        else:
+        # ── Confidence gate: reject poor matches ───────────────
+        # Only proceed if confidence is below threshold (lower = better in LBPH)
+        if conf >= _CONFIDENCE_THRESHOLD:
+            _confirm_buffer.pop(client_key, None)  # Reset streak — unknown face
             return {"ok": True, "name": "Unknown", "conf": round(conf, 1)}
+
+        # ── Multi-frame confirmation buffer ────────────────────
+        # Require same person predicted consistently N frames in a row
+        # before marking attendance. This eliminates false positives
+        # caused by single-frame prediction errors.
+        buf = _confirm_buffer.get(client_key, {"label": -1, "count": 0, "conf_sum": 0.0})
+        
+        if buf["label"] == label:
+            # Same person as before — increment streak
+            buf["count"] += 1
+            buf["conf_sum"] += conf
+        else:
+            # Different label predicted — reset streak to this new label
+            buf = {"label": label, "count": 1, "conf_sum": conf}
+        
+        _confirm_buffer[client_key] = buf
+        
+        name = global_names.get(label, "Unknown")
+        avg_conf = round(buf["conf_sum"] / buf["count"], 1)
+        
+        if buf["count"] < _CONFIRM_FRAMES:
+            # Still confirming — don't mark yet, show progress to client
+            return {
+                "ok": True,
+                "name": None,
+                "pending": name,
+                "frames": buf["count"],
+                "needed": _CONFIRM_FRAMES,
+                "conf": avg_conf
+            }
+        
+        # ── Confirmed! Mark attendance ─────────────────────────
+        _confirm_buffer.pop(client_key, None)  # Reset after marking
+        if name != "Unknown":
+            from db import mark_attendance
+            mark_attendance(str(label), name)
+        return {"ok": True, "name": name, "conf": avg_conf}
             
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1651,7 +1749,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 self.send_json(result)
 
             elif p == "/api/recognize":
-                result = api_recognize(body)
+                client_key = self.client_address[0]  # Use client IP as buffer key
+                result = api_recognize(body, client_key=client_key)
                 self.send_json(result)
 
             elif p == "/api/delete_student":

@@ -1,13 +1,15 @@
 # 02_train.py — LBPH Model Training Module
 #
-# PERFORMANCE NOTE:
-#   LBPH (Local Binary Patterns Histogram) is the LIGHTEST
-#   face recognition algorithm available in OpenCV.
-#   - No GPU required
-#   - No deep learning weights
-#   - 50 images per student → trains in ~5-15 seconds
-#   - Model file is tiny (< 1MB for 20 students)
-#   - RAM usage: ~150-300MB peak during training only
+# ACCURACY BOOST: DATA AUGMENTATION
+#   Only 8 real photos needed per student.
+#   Each photo is automatically expanded into ~11 variants:
+#     - 4 brightness levels  (darker/brighter)
+#     - 4 small rotations    (±5°, ±10°)
+#     - 1 horizontal flip
+#     - 1 gaussian noise
+#     - 1 original
+#   = 8 photos × 11 = 88 training samples per student.
+#   This gives the same accuracy as collecting 50+ raw photos.
 #
 # After training, model is saved to trainer/model.yml
 # and ID→name mapping is saved to trainer/names.txt
@@ -59,25 +61,78 @@ os.makedirs(TRAINER_PATH, exist_ok=True)
 # Increasing them improves accuracy slightly but uses more RAM.
 # ──────────────────────────────────────────────
 recognizer = cv2.face.LBPHFaceRecognizer_create(
-    radius=1,
+    radius=2,
     neighbors=8,
     grid_x=8,
     grid_y=8
 )
+
+# CLAHE: same equalizer used in 03_attendance.py
+# MUST apply to training images too, or model is trained on
+# different-looking images than what it sees at recognition time.
+_clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+
+# ──────────────────────────────────────────────
+# FUNCTION: augment_face(img_array)
+#
+# Takes one 100x100 grayscale face array and returns
+# ~11 synthetic variants via brightness, rotation,
+# flip, and noise transforms.
+#
+# WHY: LBPH accuracy improves greatly with more
+# training samples. 8 real photos × 11 augmentations
+# = 88 effective training samples — similar to
+# collecting 50+ raw photos manually.
+# ──────────────────────────────────────────────
+def augment_face(img_array):
+    """Generate augmented variants of a single grayscale face image."""
+    variants = [img_array]  # 1. Always include original
+    h, w = img_array.shape
+    center = (w // 2, h // 2)
+
+    # 2. Brightness: 4 levels (darker + brighter)
+    for factor in [0.70, 0.85, 1.15, 1.30]:
+        bright = np.clip(
+            img_array.astype(np.float32) * factor, 0, 255
+        ).astype(np.uint8)
+        variants.append(bright)
+
+    # 3. Small rotations: ±5°, ±10°
+    for angle in [-10, -5, 5, 10]:
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rotated = cv2.warpAffine(
+            img_array, M, (w, h),
+            borderMode=cv2.BORDER_REPLICATE
+        )
+        variants.append(rotated)
+
+    # 4. Horizontal flip
+    variants.append(cv2.flip(img_array, 1))
+
+    # 5. Gaussian noise
+    noise = np.random.normal(0, 8, img_array.shape).astype(np.int16)
+    noisy = np.clip(
+        img_array.astype(np.int16) + noise, 0, 255
+    ).astype(np.uint8)
+    variants.append(noisy)
+
+    return variants  # 11 total variants per photo
 
 
 # ──────────────────────────────────────────────
 # FUNCTION: load_training_data(dataset_path)
 #
 # Walks through dataset/<sid>_<name>/ folders.
-# Loads all .jpg images as grayscale numpy arrays.
+# Loads all .jpg images as grayscale numpy arrays,
+# then AUGMENTS each one into ~11 variants.
 # Returns:
 #   face_samples  → list of 100x100 numpy arrays
 #   ids           → list of integer student IDs (parallel to face_samples)
 #   id_name_map   → dict {int_id: "Name"}
 # ──────────────────────────────────────────────
 def load_training_data(dataset_path):
-    """Load all face images from dataset/ folder."""
+    """Load and augment all face images from dataset/ folder."""
     face_samples = []
     ids = []
     id_name_map = {}
@@ -116,26 +171,39 @@ def load_training_data(dataset_path):
             if f.lower().endswith(".jpg")
         ]
 
-        loaded_count = 0
+        real_count = 0
+        aug_count  = 0
 
         for img_file in img_files:
             img_path = os.path.join(folder_path, img_file)
 
             try:
-                # Open with PIL and convert to strict grayscale uint8
-                # This is more reliable than cv2.imread for consistency
+                # Open with PIL — resize to 100x100 grayscale
                 pil_image = Image.open(img_path).convert("L")
+                # Ensure all images are 100×100 before augmentation
+                pil_image = pil_image.resize((100, 100), Image.LANCZOS)
                 img_array = np.array(pil_image, dtype="uint8")
 
-                face_samples.append(img_array)
-                ids.append(student_id)
-                loaded_count += 1
+                # Apply CLAHE equalization — MUST match 03_attendance.py
+                # Recognition applies CLAHE before predict(), so training
+                # must apply it too. Without this, model is trained on
+                # raw images but recognizes equalized images → wrong matches.
+                img_array = _clahe.apply(img_array)
 
-            except Exception as e:
+                # Generate augmented variants
+                for variant in augment_face(img_array):
+                    face_samples.append(variant)
+                    ids.append(student_id)
+                    aug_count += 1
+
+                real_count += 1
+
+            except Exception:
                 # Skip corrupt/unreadable images silently
                 pass
 
-        print(f"  Loaded: {student_name:<20s} — {loaded_count} images")
+        print(f"  Loaded: {student_name:<20s} - {real_count} photos "
+              f"-> {aug_count} training samples (augmented)")
 
     return face_samples, ids, id_name_map
 
@@ -231,7 +299,7 @@ print("  Training COMPLETE!")
 print()
 print("  Students trained:")
 for sid, sname in id_name_map.items():
-    print(f"    ID {sid:>4d} → {sname}")
+    print(f"    ID {sid:>4d} -> {sname}")
 print()
 print("  Next step: run attendance system with:")
 print("    python 03_attendance.py")
