@@ -1245,24 +1245,29 @@ function captureLiveFrame() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
 
-  // Full frame skin check
+  // Full frame skin check — loosened thresholds to support varied lighting & skin tones.
+  // The server's OpenCV Haar cascade does the real face detection.
+  // This is only a lightweight pre-filter to avoid hammering the server with blank frames.
   const fullData = ctx.getImageData(0, 0, 320, 240).data;
   let totalSkin = 0;
   for (let i = 0; i < fullData.length; i += 4) {
     const r = fullData[i], g = fullData[i+1], b = fullData[i+2];
-    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) totalSkin++;
+    // Broader skin range: works for light, medium, and darker tones under varied lighting
+    if (r > 40 && g > 20 && b > 10 && r > b && (r - b) > 10 && r < 255) totalSkin++;
   }
-  const faceFound = (totalSkin / (fullData.length / 4)) > 0.05;
+  // 3% skin pixels in full frame = someone is present (was 5% — too strict for dim light)
+  const faceFound = (totalSkin / (fullData.length / 4)) > 0.03;
 
-  // Center region check — face must be in center 120x140 area
+  // Center region check — face must be roughly in the centre 120x140 area
   const centerData = ctx.getImageData(100, 50, 120, 140).data;
   let centerSkin = 0;
   for (let i = 0; i < centerData.length; i += 4) {
     const r = centerData[i], g = centerData[i+1], b = centerData[i+2];
-    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && r < 250) centerSkin++;
+    if (r > 40 && g > 20 && b > 10 && r > b && (r - b) > 10 && r < 255) centerSkin++;
   }
-  // isCentered: face skin must be >22% of center zone (stricter than registration)
-  const isCentered = faceFound && (centerSkin / (centerData.length / 4)) > 0.22;
+  // 12% of centre zone = face is centred enough to send (was 22% — too strict)
+  // Server's Haar cascade will still reject off-centre or non-face frames.
+  const isCentered = faceFound && (centerSkin / (centerData.length / 4)) > 0.12;
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
   return { dataUrl, faceFound, isCentered };
