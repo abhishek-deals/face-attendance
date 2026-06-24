@@ -1112,7 +1112,7 @@ def page_live():
     <div>
       <div class="cam-box">
         <video id="video" autoplay playsinline muted></video>
-        <canvas id="canvas" width="320" height="240"></canvas>
+        <canvas id="canvas" width="320" height="240" style="display:none"></canvas>
         <div class="cam-overlay" id="cam_status_text">Camera Off</div>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
@@ -1123,7 +1123,7 @@ def page_live():
     
     <div>
       <h3 style="font-size:15px;color:var(--accent);margin-bottom:12px">Last Recognized</h3>
-      <div class="status-box" id="scan_status" style="display:block;margin-bottom:16px">Waiting to start...</div>
+      <div class="status-box info" id="scan_status" style="display:block;margin-bottom:16px">Waiting to start...</div>
       
       <div id="recognized_list" style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto">
         <!-- populated dynamically -->
@@ -1204,8 +1204,10 @@ async function startScanning() {
             document.getElementById('scan_status').className = 'status-box success';
             const list = document.getElementById('recognized_list');
             const item = document.createElement('div');
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
             item.style = 'padding:10px;background:var(--card);border:1px solid var(--green);border-radius:8px;display:flex;justify-content:space-between;align-items:center';
-            item.innerHTML = `<strong>${data.name}</strong><span class="pill present">Present</span>`;
+            item.innerHTML = `<strong>${data.name}</strong><span style="color:var(--muted);font-size:12px">${timeStr}</span><span class="pill present">Present</span>`;
             list.prepend(item);
         }
       } else if (data.ok && data.pending) {
@@ -1215,7 +1217,7 @@ async function startScanning() {
         document.getElementById('scan_status').className = 'status-box info';
         lastRecognized = "";
       } else if (data.ok && data.name === "Unknown") {
-        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' / Needs < 80)';
+        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' — must be < 55 to match)';
         document.getElementById('scan_status').className = 'status-box error';
         lastRecognized = "";
       } else if (data.ok && data.name === null) {
@@ -1269,11 +1271,12 @@ function captureLiveFrame() {
 
 function stopAll() {
   scanning = false;
+  lastRecognized = "";  // Reset so next session re-announces the same person
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   document.getElementById('btn_start_cam').style.display = 'inline-block';
   document.getElementById('btn_stop').style.display = 'none';
   document.getElementById('cam_status_text').textContent = 'Camera Off';
-  document.getElementById('scan_status').textContent = 'Camera and scanning turned off.';
+  document.getElementById('scan_status').textContent = 'Camera stopped. Press Start to scan again.';
   document.getElementById('scan_status').className = 'status-box info';
 }
 </script>
