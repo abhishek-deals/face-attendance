@@ -472,7 +472,7 @@ footer {{ text-align: center; padding: 30px; color: var(--muted); font-size: 13p
 <div class="container">
 {body_content}
 </div>
-<footer>Face Recognition Attendance System &nbsp;|&nbsp; LBPH Algorithm &nbsp;|&nbsp; SQLite Database</footer>
+<footer>Face Recognition Attendance System &nbsp;|&nbsp; Deep Learning (SFace) &nbsp;|&nbsp; SQLite Database</footer>
 </body>
 </html>"""
 
@@ -1174,7 +1174,7 @@ def page_train():
     body = f"""
 <h2 style="margin-bottom:6px;font-size:20px">Train Face Recognition Model</h2>
 <p style="color:var(--muted);font-size:14px;margin-bottom:24px">
-  Train the LBPH model on all registered students' photos. Run this after adding new students.
+  Train the Deep Learning model on all registered students' photos. Run this after adding new students.
 </p>
 {model_info}
 {table}
@@ -1196,7 +1196,7 @@ async function runTraining() {{
   const el = document.getElementById('train_status');
   el.style.display = 'block';
   el.className = 'status-box info';
-  el.textContent = 'Training LBPH model... please wait (5-20 seconds).';
+  el.textContent = 'Training Deep Learning model... please wait (5-20 seconds).';
   try {{
     const res = await fetch('/api/train', {{ method: 'POST' }});
     const data = await res.json();
@@ -1416,10 +1416,10 @@ async function startScanning() {
           list.prepend(item);
         }
       } else if (data.ok && data.pending) {
-        setStatus('Verifying: ' + data.pending + ' (' + data.frames + '/' + (data.needed || 5) + ' frames, score: ' + data.conf + ')', 'info');
+        setStatus('Verifying: ' + data.pending + ' (' + data.frames + '/' + (data.needed || 4) + ' frames, confidence: ' + data.conf + '%)', 'info');
         lastRecognized = "";
       } else if (data.ok && data.name === "Unknown") {
-        setStatus('Face detected but not recognized (Score: ' + Math.round(data.conf) + ' \u2014 need < 60 to match)', 'error');
+        setStatus('Face detected but not recognized (Confidence: ' + Math.round(data.conf) + '% \u2014 need > 60% to match)', 'error');
         lastRecognized = "";
       } else if (data.ok && data.name === null) {
         setStatus('No face detected \u2014 look straight at the camera', 'info');
