@@ -140,10 +140,8 @@ def api_capture_frame():
             return jsonify({"ok": True, "face_found": True, "count": existing, "target": TARGET_PHOTOS, "done": True})
 
         pstore.save_face_photo(sid, existing + 1, face_encoded.tobytes())
+        pstore.add_student(sid, name.replace("_", " "))
         new_count = existing + 1
-
-        if new_count >= TARGET_PHOTOS:
-            pstore.add_student(sid, name.replace("_", " "))
 
         return jsonify({"ok": True, "face_found": True, "count": new_count, "target": TARGET_PHOTOS, "done": new_count >= TARGET_PHOTOS})
 

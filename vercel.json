@@ -9,6 +9,9 @@
       }
     }
   ],
+  "env": {
+    "TZ": "Asia/Kolkata"
+  },
   "routes": [
     {
       "src": "/(.*)",
