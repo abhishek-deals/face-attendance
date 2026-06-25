@@ -335,7 +335,6 @@ def api_recognize():
         return jsonify({"ok": True, "name": name, "conf": avg_conf, "confirmed": True})
 
     except Exception as e:
-        global _embeddings_cache
         _embeddings_cache = None
         _confirm_buffer   = {}
         return jsonify({"ok": False, "error": str(e)})
