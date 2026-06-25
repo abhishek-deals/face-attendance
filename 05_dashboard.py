@@ -32,14 +32,22 @@ TRAINER_PATH   = os.environ.get("TRAINER_PATH", "trainer")
 CASCADE_PATH   = os.environ.get("CASCADE_PATH", os.path.join("haarcascade", "haarcascade_frontalface_default.xml"))
 PORT           = int(os.environ.get("PORT", 5000))
 
-# Detect if running on Vercel (cloud) or locally
-IS_CLOUD = bool(os.environ.get("DATABASE_URL", ""))
+# Detect if running on Vercel (cloud) or locally.
+# On Vercel the module is imported by api/index.py (__name__ != '__main__'),
+# OR the VERCEL env var is set, OR DATABASE_URL is set.
+IS_CLOUD = (
+    __name__ != "__main__"
+    or bool(os.environ.get("VERCEL", ""))
+    or bool(os.environ.get("DATABASE_URL", ""))
+)
 
-# Import persistent store only if on cloud
+# Always import pstore when on cloud so db_query routes through pdb.py
+# (pdb.py now falls back to SQLite automatically if DATABASE_URL is not set)
 if IS_CLOUD:
     try:
         import pdb as pstore
-    except ImportError:
+        pstore.setup_db()  # ensure tables exist
+    except Exception:
         pstore = None
 else:
     pstore = None
@@ -52,21 +60,36 @@ training_status = {"running": False, "done": False, "message": "", "students": [
 # DATABASE HELPERS  (SQLite locally, Postgres on Vercel)
 # ══════════════════════════════════════════════
 def db_query(sql, params=()):
-    """Run a SELECT query. Uses PostgreSQL on Vercel, SQLite locally."""
+    """Run a SELECT query. Routes through pstore (pdb.py) on Vercel, SQLite locally."""
     if IS_CLOUD and pstore:
-        # On cloud: route to pstore's direct connection
-        import psycopg2, psycopg2.extras
-        conn = pstore.get_conn()
-        try:
-            # Convert SQLite ? placeholders to PostgreSQL %s
-            pg_sql = sql.replace("?", "%s")
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(pg_sql, params)
-                return [dict(r) for r in cur.fetchall()]
-        except Exception:
-            return []
-        finally:
-            conn.close()
+        # pdb.py handles both PostgreSQL and SQLite fallback
+        sqlite_path = getattr(pstore, '_SQLITE_PATH', '/tmp/faceattendance.db')
+        use_pg = getattr(pstore, '_use_postgres', lambda: False)()
+        if use_pg:
+            try:
+                import psycopg2, psycopg2.extras
+                conn = pstore._pg_conn()
+                try:
+                    pg_sql = sql.replace("?", "%s")
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute(pg_sql, params)
+                        return [dict(r) for r in cur.fetchall()]
+                except Exception:
+                    return []
+                finally:
+                    conn.close()
+            except Exception:
+                return []
+        else:
+            conn = pstore._sqlite_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                return [dict(row) for row in cur.fetchall()]
+            except Exception:
+                return []
+            finally:
+                conn.close()
     else:
         if not os.path.exists(DB_PATH):
             return []
@@ -82,21 +105,37 @@ def db_query(sql, params=()):
             conn.close()
 
 def db_execute(sql, params=()):
-    """Run an INSERT/UPDATE/DELETE. Uses PostgreSQL on Vercel, SQLite locally."""
+    """Run an INSERT/UPDATE/DELETE. Routes through pstore (pdb.py) on Vercel, SQLite locally."""
     if IS_CLOUD and pstore:
-        import psycopg2
-        conn = pstore.get_conn()
-        try:
-            pg_sql = sql.replace("?", "%s")
-            with conn.cursor() as cur:
-                cur.execute(pg_sql, params)
-                rows = cur.rowcount
-            conn.commit()
-            return rows
-        except Exception:
-            return 0
-        finally:
-            conn.close()
+        use_pg = getattr(pstore, '_use_postgres', lambda: False)()
+        if use_pg:
+            try:
+                import psycopg2
+                conn = pstore._pg_conn()
+                try:
+                    pg_sql = sql.replace("?", "%s")
+                    with conn.cursor() as cur:
+                        cur.execute(pg_sql, params)
+                        rows = cur.rowcount
+                    conn.commit()
+                    return rows
+                except Exception:
+                    return 0
+                finally:
+                    conn.close()
+            except Exception:
+                return 0
+        else:
+            conn = pstore._sqlite_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                conn.commit()
+                return cur.rowcount
+            except Exception:
+                return 0
+            finally:
+                conn.close()
     else:
         conn = sqlite3.connect(DB_PATH)
         try:
@@ -992,16 +1031,32 @@ if (dz) {
 # PAGE: TRAIN MODEL
 # ══════════════════════════════════════════════
 def page_train():
-    # Count dataset students
-    ds_students = []
-    if os.path.exists(DATASET_PATH):
-        for f in os.listdir(DATASET_PATH):
-            fp = os.path.join(DATASET_PATH, f)
-            if os.path.isdir(fp) and "_" in f:
-                imgs = [x for x in os.listdir(fp) if x.lower().endswith(".jpg")]
-                ds_students.append({"folder": f, "count": len(imgs)})
+    # On cloud: get students from database; locally: use filesystem dataset
+    if IS_CLOUD and pstore:
+        try:
+            db_studs = pstore.get_students_list()
+            ds_students = []
+            for s in db_studs:
+                count = pstore.get_face_photo_count(s['id'])
+                ds_students.append({"folder": f"{s['id']}_{s['name']}", "count": count})
+        except Exception:
+            ds_students = []
+        # Model exists if it's stored in database
+        try:
+            mb, _ = pstore.load_model()
+            model_exists = mb is not None
+        except Exception:
+            model_exists = False
+    else:
+        ds_students = []
+        if os.path.exists(DATASET_PATH):
+            for f in os.listdir(DATASET_PATH):
+                fp = os.path.join(DATASET_PATH, f)
+                if os.path.isdir(fp) and "_" in f:
+                    imgs = [x for x in os.listdir(fp) if x.lower().endswith(".jpg")]
+                    ds_students.append({"folder": f, "count": len(imgs)})
+        model_exists = os.path.exists(os.path.join(TRAINER_PATH, "model.yml"))
 
-    model_exists = os.path.exists(os.path.join(TRAINER_PATH, "model.yml"))
     status = training_status
 
     rows = ""
