@@ -21,8 +21,14 @@ import json
 import base64
 import threading
 import webbrowser
-from datetime import datetime
+from datetime import datetime as dt, timedelta, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+IST = timezone(timedelta(hours=5, minutes=30))
+class datetime(dt):
+    @classmethod
+    def now(cls, tz=None):
+        return dt.now(IST)
 from urllib.parse import urlparse, parse_qs
 
 DB_PATH        = os.environ.get("DB_PATH", "attendance.db")
@@ -714,7 +720,7 @@ def page_register():
 <div style="max-width:900px">
 <h2 style="margin-bottom:6px;font-size:20px">Register New Student</h2>
 <p style="color:var(--muted);font-size:14px;margin-bottom:24px">
-  Enter student details, then capture 3 photos using the live camera or upload existing photos.
+  Enter student details, then capture 3 photos using the live camera.
   After registration, go to <a href="/train" style="color:var(--accent)">Train Model</a>.
 </p>
 
@@ -740,11 +746,6 @@ def page_register():
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <h3 style="font-size:15px;color:var(--accent)">Step 2 &mdash; Capture Face Photos</h3>
       <span id="student_badge" class="pill id"></span>
-    </div>
-
-    <div class="tab-bar">
-      <button class="tab active" id="tab_cam" onclick="switchTab('cam')">&#128247; Live Camera</button>
-      <button class="tab" id="tab_upload" onclick="switchTab('upload')">&#128194; Upload Photos</button>
     </div>
 
     <!-- CAMERA TAB -->
@@ -789,29 +790,7 @@ def page_register():
       </div>
     </div>
 
-    <!-- UPLOAD TAB -->
-    <div id="upload_tab" style="display:none">
-      <div class="upload-zone" onclick="document.getElementById('file_input').click()" id="drop_zone">
-        <input type="file" id="file_input" multiple accept="image/*" onchange="handleFiles(this.files)">
-        <div style="font-size:40px;margin-bottom:10px">&#128247;</div>
-        <div style="font-size:15px;font-weight:600;margin-bottom:6px">Click to select photos</div>
-        <div style="font-size:13px;color:var(--muted)">Select 5-30 clear face photos &bull; JPG, PNG accepted &bull; Augmentation auto-expands them</div>
-      </div>
-      <div class="preview-grid" id="preview_grid"></div>
-      <div class="progress-bar" style="margin-top:12px"><div class="progress-fill" id="upload_progress" style="width:0%"></div></div>
-      <div id="upload_status_text" style="font-size:13px;color:var(--muted);margin:6px 0">No files selected</div>
-      <div class="status-box" id="upload_status"></div>
-      <button class="btn btn-success" id="btn_upload" onclick="submitUpload()" style="display:none;margin-top:12px">
-        Upload &amp; Register
-      </button>
-      <div id="upload_done" style="display:none;margin-top:16px">
-        <div style="color:var(--green);font-weight:700;font-size:15px;margin-bottom:10px">
-          &#10003; Photos uploaded successfully!
-        </div>
-        <a href="/train" class="btn btn-success" style="margin-right:8px">&#129504; Train Model Now</a>
-        <button class="btn btn-outline" onclick="resetForm()">Add Another Student</button>
-      </div>
-    </div>
+
   </div>
 </div>
 </div>
@@ -822,7 +801,6 @@ let capturing = false;
 let captureCount = 0;
 let currentSid = '';
 let currentName = '';
-let uploadFiles = [];
 
 // ── Step 1 → Step 2
 async function goStep2() {
@@ -854,14 +832,7 @@ async function goStep2() {
   document.getElementById('step2').style.display = 'block';
 }
 
-// ── Tab switching
-function switchTab(tab) {
-  document.getElementById('cam_tab').style.display    = tab === 'cam'    ? 'block' : 'none';
-  document.getElementById('upload_tab').style.display = tab === 'upload' ? 'block' : 'none';
-  document.getElementById('tab_cam').className    = 'tab' + (tab === 'cam'    ? ' active' : '');
-  document.getElementById('tab_upload').className = 'tab' + (tab === 'upload' ? ' active' : '');
-  if (tab !== 'cam' && stream) { stopCamera(); }
-}
+
 
 // ── Camera
 async function startCamera() {
@@ -1012,64 +983,7 @@ function onCaptureDone() {
   document.getElementById('done_section').style.display = 'block';
 }
 
-// ── Upload
-function handleFiles(files) {
-  uploadFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
-  const grid = document.getElementById('preview_grid');
-  grid.innerHTML = '';
-  uploadFiles.forEach(f => {
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(f);
-    grid.appendChild(img);
-  });
-  document.getElementById('upload_status_text').textContent =
-    uploadFiles.length + ' photo' + (uploadFiles.length !== 1 ? 's' : '') + ' selected';
-  document.getElementById('btn_upload').style.display =
-    uploadFiles.length >= 5 ? 'inline-block' : 'none';
-  if (uploadFiles.length < 5) {
-    showStatus('upload_status', 'Please select at least 5 photos for accurate recognition.', 'info');
-  } else { hideStatus('upload_status'); }
-}
 
-async function submitUpload() {
-  if (uploadFiles.length < 1) return;
-  document.getElementById('btn_upload').disabled = true;
-  showStatus('upload_status', 'Uploading and processing photos...', 'info');
-  let saved = 0;
-  for (let i = 0; i < uploadFiles.length; i++) {
-    const b64 = await fileToB64(uploadFiles[i]);
-    try {
-      const res = await fetch('/api/capture_frame', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ frame: b64, student_id: currentSid, name: currentName })
-      });
-      const data = await res.json();
-      if (data.ok && data.face_found) { saved = data.count; }
-    } catch(e) {}
-    const pct = Math.round((i+1) / uploadFiles.length * 100);
-    document.getElementById('upload_progress').style.width = pct + '%';
-    document.getElementById('upload_status_text').textContent =
-      'Processing ' + (i+1) + ' of ' + uploadFiles.length + '...';
-  }
-  if (saved >= 5) {
-    showStatus('upload_status', saved + ' face photos saved! Augmentation will expand these to ' + (saved*11) + '+ samples.', 'success');
-    document.getElementById('upload_done').style.display = 'block';
-    document.getElementById('btn_upload').style.display = 'none';
-  } else {
-    showStatus('upload_status', 'Only ' + saved + ' face photos detected. Use at least 5 clear face photos.', 'error');
-    document.getElementById('btn_upload').disabled = false;
-  }
-}
-
-function fileToB64(file) {
-  return new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = e => res(e.target.result);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-}
 
 // ── Helpers
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -1082,17 +996,7 @@ function showStatus(id, msg, type) {
 function hideStatus(id) { document.getElementById(id).style.display = 'none'; }
 function resetForm() { location.reload(); }
 
-// Drag & drop on upload zone
-const dz = document.getElementById('drop_zone');
-if (dz) {
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor='var(--accent)'; });
-  dz.addEventListener('dragleave', () => { dz.style.borderColor='var(--border)'; });
-  dz.addEventListener('drop', e => {
-    e.preventDefault();
-    dz.style.borderColor = 'var(--border)';
-    handleFiles(e.dataTransfer.files);
-  });
-}
+
 </script>
 """
     return html_page("Register Student", body, "Register Student")

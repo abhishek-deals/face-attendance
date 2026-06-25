@@ -19,7 +19,13 @@
 import os
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime as dt, timedelta, timezone
+
+IST = timezone(timedelta(hours=5, minutes=30))
+class datetime(dt):
+    @classmethod
+    def now(cls, tz=None):
+        return dt.now(IST)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
