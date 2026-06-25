@@ -57,40 +57,52 @@ training_status = {"running": False, "done": False, "message": "", "students": [
 
 
 # ══════════════════════════════════════════════
-# DATABASE HELPERS  (SQLite locally, Postgres on Vercel)
+# DATABASE HELPERS  (routes through pdb.py on cloud)
 # ══════════════════════════════════════════════
+def _pg_safe_sql(sql):
+    """Convert SQLite SQL to PostgreSQL compatible SQL."""
+    # ? → %s for parametrized queries
+    sql = sql.replace("?", "%s")
+    # CAST(col AS INTEGER) → col::integer
+    import re
+    sql = re.sub(r'CAST\(([^)]+) AS INTEGER\)', r'\1::integer', sql, flags=re.IGNORECASE)
+    return sql
+
+
 def db_query(sql, params=()):
     """Run a SELECT query. Routes through pstore (pdb.py) on Vercel, SQLite locally."""
     if IS_CLOUD and pstore:
-        # pdb.py handles both PostgreSQL and SQLite fallback
-        sqlite_path = getattr(pstore, '_SQLITE_PATH', '/tmp/faceattendance.db')
         use_pg = getattr(pstore, '_use_postgres', lambda: False)()
         if use_pg:
             try:
-                import psycopg2, psycopg2.extras
+                import psycopg2.extras
                 conn = pstore._pg_conn()
                 try:
-                    pg_sql = sql.replace("?", "%s")
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                        cur.execute(pg_sql, params)
+                        cur.execute(_pg_safe_sql(sql), params)
                         return [dict(r) for r in cur.fetchall()]
-                except Exception:
+                except Exception as _e:
+                    print("[db_query PG error]", _e, sql)
                     return []
                 finally:
                     conn.close()
-            except Exception:
+            except Exception as _e:
+                print("[db_query PG conn error]", _e)
                 return []
         else:
+            # SQLite fallback (pstore._sqlite_conn uses /tmp/faceattendance.db)
             conn = pstore._sqlite_conn()
             try:
                 cur = conn.cursor()
                 cur.execute(sql, params)
                 return [dict(row) for row in cur.fetchall()]
-            except Exception:
+            except Exception as _e:
+                print("[db_query SQLite error]", _e, sql)
                 return []
             finally:
                 conn.close()
     else:
+        # Local mode: use attendance.db
         if not os.path.exists(DB_PATH):
             return []
         conn = sqlite3.connect(DB_PATH)
@@ -99,10 +111,12 @@ def db_query(sql, params=()):
             cur = conn.cursor()
             cur.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]
-        except Exception:
+        except Exception as _e:
+            print("[db_query local error]", _e)
             return []
         finally:
             conn.close()
+
 
 def db_execute(sql, params=()):
     """Run an INSERT/UPDATE/DELETE. Routes through pstore (pdb.py) on Vercel, SQLite locally."""
@@ -113,17 +127,18 @@ def db_execute(sql, params=()):
                 import psycopg2
                 conn = pstore._pg_conn()
                 try:
-                    pg_sql = sql.replace("?", "%s")
                     with conn.cursor() as cur:
-                        cur.execute(pg_sql, params)
+                        cur.execute(_pg_safe_sql(sql), params)
                         rows = cur.rowcount
                     conn.commit()
                     return rows
-                except Exception:
+                except Exception as _e:
+                    print("[db_execute PG error]", _e)
                     return 0
                 finally:
                     conn.close()
-            except Exception:
+            except Exception as _e:
+                print("[db_execute PG conn error]", _e)
                 return 0
         else:
             conn = pstore._sqlite_conn()
@@ -132,7 +147,8 @@ def db_execute(sql, params=()):
                 cur.execute(sql, params)
                 conn.commit()
                 return cur.rowcount
-            except Exception:
+            except Exception as _e:
+                print("[db_execute SQLite error]", _e)
                 return 0
             finally:
                 conn.close()
@@ -143,10 +159,12 @@ def db_execute(sql, params=()):
             cur.execute(sql, params)
             conn.commit()
             return cur.rowcount
-        except Exception:
+        except Exception as _e:
+            print("[db_execute local error]", _e)
             return 0
         finally:
             conn.close()
+
 
 def get_today():
     return datetime.now().strftime("%Y-%m-%d")
@@ -464,10 +482,22 @@ footer {{ text-align: center; padding: 30px; color: var(--muted); font-size: 13p
 # ══════════════════════════════════════════════
 def page_today():
     today = get_today()
-    records = db_query("SELECT student_id,name,date,time FROM attendance WHERE date=? ORDER BY time", (today,))
-    total_s = db_query("SELECT COUNT(*) as c FROM students")[0]["c"] if db_query("SELECT COUNT(*) as c FROM students") else 0
-    all_days = db_query("SELECT COUNT(DISTINCT date) as c FROM attendance")
-    all_days = all_days[0]["c"] if all_days else 0
+    # On cloud use pstore for reliability; locally use db_query
+    if IS_CLOUD and pstore:
+        try:
+            records   = pstore.get_today_report()
+            students  = pstore.get_students_list()
+            total_s   = len(students)
+            all_recs  = pstore.get_all_report()
+            all_days  = len(set(r['date'] for r in all_recs))
+        except Exception:
+            records, total_s, all_days = [], 0, 0
+    else:
+        records  = db_query("SELECT student_id,name,date,time FROM attendance WHERE date=? ORDER BY time", (today,))
+        cnt_res  = db_query("SELECT COUNT(*) as c FROM students")
+        total_s  = cnt_res[0]["c"] if cnt_res else 0
+        days_res = db_query("SELECT COUNT(DISTINCT date) as c FROM attendance")
+        all_days = days_res[0]["c"] if days_res else 0
 
     stats = f"""<div class="stats-grid">
   <div class="stat-card green"><div class="stat-label">Present Today</div>
@@ -507,7 +537,13 @@ def page_today():
 # PAGE: ALL RECORDS
 # ══════════════════════════════════════════════
 def page_all():
-    records = db_query("SELECT student_id,name,date,time FROM attendance ORDER BY date DESC,time DESC")
+    if IS_CLOUD and pstore:
+        try:
+            records = pstore.get_all_report()
+        except Exception:
+            records = []
+    else:
+        records = db_query("SELECT student_id,name,date,time FROM attendance ORDER BY date DESC,time DESC")
     if records:
         rows = "".join(f"""<tr><td style="color:var(--muted)">{i}</td>
           <td><span class="pill id">{r['student_id']}</span></td>
@@ -529,12 +565,26 @@ def page_all():
 # PAGE: STUDENTS
 # ══════════════════════════════════════════════
 def page_students():
-    students = db_query("SELECT student_id,name,date_added FROM students ORDER BY student_id")
+    if IS_CLOUD and pstore:
+        try:
+            students = pstore.get_students_list()
+            # Convert to same format as db_query
+            students = [{"student_id": s["id"], "name": s["name"], "date_added": s["date_added"]} for s in students]
+        except Exception:
+            students = []
+    else:
+        students = db_query("SELECT student_id,name,date_added FROM students ORDER BY student_id")
     if students:
         rows = ""
         for i, s in enumerate(students, 1):
-            cnt = db_query("SELECT COUNT(*) as c FROM attendance WHERE student_id=?", (s['student_id'],))
-            days = cnt[0]["c"] if cnt else 0
+            if IS_CLOUD and pstore:
+                try:
+                    days = len([r for r in pstore.get_all_report() if r['student_id'] == s['student_id']])
+                except Exception:
+                    days = 0
+            else:
+                cnt = db_query("SELECT COUNT(*) as c FROM attendance WHERE student_id=?", (s['student_id'],))
+                days = cnt[0]["c"] if cnt else 0
             rows += f"""<tr><td style="color:var(--muted)">{i}</td>
               <td><img src="/photo?id={s['student_id']}" style="width:36px;height:36px;border-radius:50%;object-fit:cover" onerror="this.style.display='none'"></td>
               <td><span class="pill id">{s['student_id']}</span></td>
@@ -576,20 +626,41 @@ async function deleteStudent(sid) {{
 def page_student_details(sid):
     if not sid:
         return html_page("Student Details", "<h2>No ID provided</h2>")
-        
-    s_rows = db_query("SELECT name, date_added FROM students WHERE student_id=? OR CAST(student_id AS INTEGER)=?", (sid, int(sid) if sid.isdigit() else 0))
+
+    if IS_CLOUD and pstore:
+        try:
+            all_students = pstore.get_students_list()
+            s_data = [s for s in all_students if str(s['id']) == str(sid)]
+            s_rows = [{"name": s['name'], "date_added": s['date_added']} for s in s_data]
+        except Exception:
+            s_rows = []
+    else:
+        s_rows = db_query(
+            "SELECT name, date_added FROM students WHERE student_id=? OR CAST(student_id AS INTEGER)=?",
+            (sid, int(sid) if sid.isdigit() else 0)
+        )
     if not s_rows:
         return html_page("Student Details", "<h2>Student not found</h2>")
         
-    name = s_rows[0]['name']
+    name     = s_rows[0]['name']
     enrolled = s_rows[0]['date_added']
-    
-    # Get all distinct dates when AT LEAST ONE attendance was marked in the whole school
-    all_dates = db_query("SELECT DISTINCT date FROM attendance ORDER BY date DESC")
-    
-    # Get this student's attendance records
-    my_att = db_query("SELECT date, time FROM attendance WHERE student_id=? OR CAST(student_id AS INTEGER)=?", (sid, int(sid) if sid.isdigit() else 0))
-    my_att_map = {r['date']: r['time'] for r in my_att}
+
+    if IS_CLOUD and pstore:
+        try:
+            all_att  = pstore.get_all_report()
+            all_dates = sorted(set(r['date'] for r in all_att), reverse=True)
+            all_dates = [{"date": d} for d in all_dates]
+            my_att   = [r for r in all_att if str(r['student_id']) == str(sid)]
+            my_att_map = {r['date']: r['time'] for r in my_att}
+        except Exception:
+            all_dates, my_att_map = [], {}
+    else:
+        all_dates  = db_query("SELECT DISTINCT date FROM attendance ORDER BY date DESC")
+        my_att     = db_query(
+            "SELECT date, time FROM attendance WHERE student_id=? OR CAST(student_id AS INTEGER)=?",
+            (sid, int(sid) if sid.isdigit() else 0)
+        )
+        my_att_map = {r['date']: r['time'] for r in my_att}
     
     rows = ""
     present_count = 0
@@ -1088,7 +1159,7 @@ def page_train():
   <div class="stat-value {'green' if model_exists else 'yellow'}" style="font-size:20px;margin-top:8px">
     {'&#10003; Model Ready' if model_exists else '&#9888; Not Trained Yet'}
   </div>
-  <div class="stat-sub">{'trainer/model.yml exists' if model_exists else 'Run training to create model'}</div>
+  <div class="stat-sub">{'Model stored in database' if (IS_CLOUD and model_exists) else ('trainer/model.yml exists' if model_exists else 'Click Start Training below')}</div>
 </div>"""
 
     train_status_html = ""
@@ -1096,6 +1167,9 @@ def page_train():
         train_status_html = '<div class="status-box info" style="display:block">Training in progress... please wait.</div>'
     elif status["done"]:
         train_status_html = f'<div class="status-box success" style="display:block">{status["message"]}</div>'
+
+    # Button is disabled only if explicitly running
+    btn_disabled = "disabled" if status["running"] else ""
 
     body = f"""
 <h2 style="margin-bottom:6px;font-size:20px">Train Face Recognition Model</h2>
@@ -1106,18 +1180,14 @@ def page_train():
 {table}
 <div style="margin-top:20px">
   {train_status_html}
-  <button class="btn btn-success" id="btn_train" onclick="runTraining()"
-    {'disabled' if not ds_students or status['running'] else ''}>
-    &#129504; Start Training
+  <button class="btn btn-success" id="btn_train" onclick="runTraining()" {btn_disabled}>
+    &#129504; {'Retry Training' if model_exists else 'Start Training'}
   </button>
   <span style="margin-left:14px;font-size:13px;color:var(--muted)">
     Training takes 5-20 seconds depending on student count.
   </span>
 </div>
-<div class="status-box" id="train_status" style="display:{'block' if status['done'] or status['running'] else 'none'};
-  margin-top:16px"
-  class="{'success' if status['done'] else 'info'}">
-</div>
+<div class="status-box" id="train_status" style="display:none;margin-top:16px"></div>
 
 <script>
 async function runTraining() {{
