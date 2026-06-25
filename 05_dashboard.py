@@ -1136,6 +1136,7 @@ def page_live():
 <script>
 let stream = null;
 let scanning = false;
+let lastRecognized = "";  // Module-scope so stopAll() can reset it
 
 async function startCameraAndScan() {
   try {
@@ -1169,23 +1170,16 @@ async function startScanning() {
   document.getElementById('scan_status').textContent = 'Look straight at the camera...';
   document.getElementById('scan_status').className = 'status-box info';
 
-  let lastRecognized = "";
-
   while (scanning) {
-    // Browser-side check first: only process if face is frontal/centered
-    const { dataUrl, faceFound, isCentered } = captureLiveFrame();
+    // Lightweight browser-side check: only skip completely dark/blank frames.
+    // Server does the real face detection, centering, and LBPH recognition.
+    const { dataUrl, faceFound } = captureLiveFrame();
 
-    if (!faceFound || !isCentered) {
-      // Don't send to server — just show guidance
-      if (!faceFound) {
-        document.getElementById('scan_status').textContent = 'No face detected — look straight at the camera';
-        document.getElementById('scan_status').className = 'status-box info';
-      } else {
-        document.getElementById('scan_status').textContent = 'Face not centered — look straight into the camera';
-        document.getElementById('scan_status').className = 'status-box info';
-      }
+    if (!faceFound) {
+      document.getElementById('scan_status').textContent = 'Camera covered or too dark — face the camera';
+      document.getElementById('scan_status').className = 'status-box info';
       lastRecognized = "";
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 300));
       continue;
     }
 
@@ -1198,39 +1192,45 @@ async function startScanning() {
       const data = await res.json();
       
       if (data.ok && data.name && data.name !== "Unknown") {
-        if (data.name !== lastRecognized) {
-            lastRecognized = data.name;
-            document.getElementById('scan_status').textContent = `\u2705 ${data.name} marked Present!`;
-            document.getElementById('scan_status').className = 'status-box success';
-            const list = document.getElementById('recognized_list');
-            const item = document.createElement('div');
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-            item.style = 'padding:10px;background:var(--card);border:1px solid var(--green);border-radius:8px;display:flex;justify-content:space-between;align-items:center';
-            item.innerHTML = `<strong>${data.name}</strong><span style="color:var(--muted);font-size:12px">${timeStr}</span><span class="pill present">Present</span>`;
-            list.prepend(item);
+        if (data.already_marked) {
+          // Already marked this session — just show persistent "already marked" status
+          document.getElementById('scan_status').textContent = `\u2705 ${data.name} — Already marked present today`;
+          document.getElementById('scan_status').className = 'status-box success';
+        } else if (data.name !== lastRecognized) {
+          lastRecognized = data.name;
+          document.getElementById('scan_status').textContent = `\u2705 ${data.name} marked Present!`;
+          document.getElementById('scan_status').className = 'status-box success';
+          const list = document.getElementById('recognized_list');
+          const item = document.createElement('div');
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+          item.style = 'padding:10px;background:var(--card);border:1px solid var(--green);border-radius:8px;display:flex;justify-content:space-between;align-items:center';
+          item.innerHTML = `<strong>${data.name}</strong><span style="color:var(--muted);font-size:12px">${timeStr}</span><span class="pill present">Present</span>`;
+          list.prepend(item);
         }
       } else if (data.ok && data.pending) {
-        // Confirming face — show progress dots
-        const dots = '.'.repeat(data.frames || 1);
-        document.getElementById('scan_status').textContent = `\ud83d\udd0d Confirming: ${data.pending}${dots} (Score: ${data.conf})`;
+        // Confirming face — show progress bar style
+        const pct = Math.round((data.frames / (data.needed || 5)) * 100);
+        document.getElementById('scan_status').textContent = `Verifying: ${data.pending} (${data.frames}/${data.needed || 5} frames, score: ${data.conf})`;
         document.getElementById('scan_status').className = 'status-box info';
         lastRecognized = "";
       } else if (data.ok && data.name === "Unknown") {
-        document.getElementById('scan_status').textContent = 'Face detected but not recognized (Score: ' + Math.round(data.conf) + ' — must be < 55 to match)';
+        document.getElementById('scan_status').textContent = `Face detected but not recognized (Score: ${Math.round(data.conf)} — need score < 60 to match)`;
         document.getElementById('scan_status').className = 'status-box error';
         lastRecognized = "";
       } else if (data.ok && data.name === null) {
-        document.getElementById('scan_status').textContent = 'Look straight at the camera...';
+        document.getElementById('scan_status').textContent = 'No face detected — look straight at the camera';
         document.getElementById('scan_status').className = 'status-box info';
         lastRecognized = "";
       } else if (!data.ok) {
-        document.getElementById('scan_status').textContent = data.error;
+        document.getElementById('scan_status').textContent = '\u274C ' + data.error;
         document.getElementById('scan_status').className = 'status-box error';
         scanning = false;
         break;
       }
-    } catch(e) {}
+    } catch(e) {
+      // Network or parse error — just retry silently
+    }
     
     await new Promise(r => setTimeout(r, 150));
   }
@@ -1245,29 +1245,22 @@ function captureLiveFrame() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, 320, 240);
 
-  // Full frame skin check — loosened thresholds to support varied lighting & skin tones.
-  // The server's OpenCV Haar cascade does the real face detection.
-  // This is only a lightweight pre-filter to avoid hammering the server with blank frames.
+  // LIGHTWEIGHT browser-side pre-filter: only blocks completely blank/dark frames.
+  // The server's OpenCV Haar cascade does all real face detection & centering checks.
+  // We use a very loose threshold here to avoid blocking valid faces in dim lighting.
   const fullData = ctx.getImageData(0, 0, 320, 240).data;
   let totalSkin = 0;
   for (let i = 0; i < fullData.length; i += 4) {
     const r = fullData[i], g = fullData[i+1], b = fullData[i+2];
-    // Broader skin range: works for light, medium, and darker tones under varied lighting
-    if (r > 40 && g > 20 && b > 10 && r > b && (r - b) > 10 && r < 255) totalSkin++;
+    // Very broad range — just checking "is there a person in frame at all?"
+    if (r > 30 && g > 15 && b > 5 && r > b && (r - b) > 5 && r < 255) totalSkin++;
   }
-  // 3% skin pixels in full frame = someone is present (was 5% — too strict for dim light)
-  const faceFound = (totalSkin / (fullData.length / 4)) > 0.03;
+  // Only 2% needed — just to filter completely blank/covered camera frames
+  const faceFound = (totalSkin / (fullData.length / 4)) > 0.02;
 
-  // Center region check — face must be roughly in the centre 120x140 area
-  const centerData = ctx.getImageData(100, 50, 120, 140).data;
-  let centerSkin = 0;
-  for (let i = 0; i < centerData.length; i += 4) {
-    const r = centerData[i], g = centerData[i+1], b = centerData[i+2];
-    if (r > 40 && g > 20 && b > 10 && r > b && (r - b) > 10 && r < 255) centerSkin++;
-  }
-  // 12% of centre zone = face is centred enough to send (was 22% — too strict)
-  // Server's Haar cascade will still reject off-centre or non-face frames.
-  const isCentered = faceFound && (centerSkin / (centerData.length / 4)) > 0.12;
+  // Always mark as centered — let server's Haar cascade do the real centering check
+  // This prevents the browser from wrongly blocking valid face positions.
+  const isCentered = faceFound;
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
   return { dataUrl, faceFound, isCentered };
@@ -1454,13 +1447,21 @@ def api_train():
 
         with open(os.path.join(TRAINER_PATH, "names.txt"), "w", encoding="utf-8") as f:
             for sid, sname in id_name_map.items():
-                f.write(f"{sid}:{sname}\n")
+                # Convert ALL_CAPS_WITH_UNDERSCORES to proper Title Case
+                # e.g. "ABHISHEK" -> "Abhishek", "JOHN_DOE" -> "John Doe"
+                display_name = sname.replace("_", " ").title()
+                f.write(f"{sid}:{display_name}\n")
 
         del face_samples, ids
 
-        student_names = list(id_name_map.values())
+        student_names = [n.replace("_", " ").title() for n in id_name_map.values()]
         msg = f"Training complete! {len(student_names)} student(s): {', '.join(student_names)}"
         training_status = {"ok": True, "running": False, "done": True, "message": msg, "students": student_names}
+
+        # Force model reload on next recognition request
+        global global_recognizer, global_names
+        global_recognizer = None
+        global_names = {}
 
         return {"ok": True, "students": student_names, "message": msg}
 
@@ -1489,8 +1490,10 @@ global_names = {}
 # --- Confirmation buffer (in-memory, per server session) ---
 # Tracks consecutive same-label predictions before marking
 _confirm_buffer = {}   # {client_ip_or_session: {"label": int, "count": int, "conf_sum": float}}
-_CONFIRM_FRAMES = 6    # Must see same person this many frames in a row
-_CONFIDENCE_THRESHOLD = 55  # LBPH: lower = better match. Reject anything >= this.
+_CONFIRM_FRAMES = 5    # Must see same person this many frames in a row
+_CONFIDENCE_THRESHOLD = 60  # LBPH: lower = better match. Reject anything >= this.
+                             # 60 = good balance: strict enough to avoid wrong names,
+                             # loose enough to match in varied lighting.
 
 def load_model():
     global global_recognizer, global_names
@@ -1588,8 +1591,14 @@ def api_recognize(body_bytes, client_key="default"):
         # before marking attendance. This eliminates false positives
         # caused by single-frame prediction errors.
         buf = _confirm_buffer.get(client_key, {"label": -1, "count": 0, "conf_sum": 0.0})
+
+        # If already marked this session for this label, skip re-marking for 30s window
+        # (count=999 is our "cooldown" sentinel)
+        if buf.get("marked") and buf["label"] == label:
+            name = global_names.get(label, "Unknown")
+            return {"ok": True, "name": name, "conf": round(conf, 1), "already_marked": True}
         
-        if buf["label"] == label:
+        if buf["label"] == label and not buf.get("marked"):
             # Same person as before — increment streak
             buf["count"] += 1
             buf["conf_sum"] += conf
@@ -1618,6 +1627,9 @@ def api_recognize(body_bytes, client_key="default"):
         if name != "Unknown":
             from db import mark_attendance
             mark_attendance(str(label), name)
+            # After marking, set a cooldown so same person isn't re-announced repeatedly.
+            # We re-use the buffer with a special "marked" state.
+            _confirm_buffer[client_key] = {"label": label, "count": 999, "conf_sum": 0.0, "marked": True}
         return {"ok": True, "name": name, "conf": avg_conf}
             
     except Exception as e:

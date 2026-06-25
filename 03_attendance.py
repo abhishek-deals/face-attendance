@@ -118,7 +118,9 @@ try:
             parts = line.split(":", 1)
             if len(parts) == 2:
                 try:
-                    id_to_name[int(parts[0])] = parts[1]
+                    # Convert name to Title Case in case it was stored ALL_CAPS
+                    name_val = parts[1].replace("_", " ").title()
+                    id_to_name[int(parts[0])] = name_val
                 except ValueError:
                     pass
 except Exception as e:

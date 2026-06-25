@@ -252,6 +252,12 @@ def api_train():
 
         student_names = list(id_name_map.values())
         msg = f"Training complete! {len(student_names)} student(s): {', '.join(student_names)}"
+
+        # Reset in-memory cache so next recognition reloads the fresh model
+        global _recognizer_cache, _names_cache
+        _recognizer_cache = None
+        _names_cache = None
+
         return jsonify({"ok": True, "students": student_names, "message": msg})
 
     except Exception as e:
@@ -264,8 +270,9 @@ def api_train():
 _recognizer_cache = None
 _names_cache = None
 _confirm_buffer = {}   # {client_ip: {"label": int, "count": int, "conf_sum": float}}
-_CONFIRM_FRAMES = 6    # Must see same person this many frames in a row
-_CONFIDENCE_THRESHOLD = 55  # LBPH: lower = better match. Reject anything >= this.
+_CONFIRM_FRAMES = 5    # Must see same person this many frames in a row
+_CONFIDENCE_THRESHOLD = 60  # LBPH: lower = better match. Reject anything >= this.
+                             # 60 = good balance: avoids wrong names, works in varied lighting.
 
 @app.route('/api/recognize', methods=['POST'])
 def api_recognize():
@@ -289,7 +296,8 @@ def api_recognize():
                 f.write(model_bytes)
             _recognizer_cache = cv2.face.LBPHFaceRecognizer_create()
             _recognizer_cache.read(model_tmp)
-            _names_cache = {int(k): v for k, v in names_dict.items()}
+            # Ensure names are in Title Case (handles ALL_CAPS stored names)
+            _names_cache = {int(k): v.replace("_", " ").title() for k, v in names_dict.items()}
             _confirm_buffer = {}
 
         data = json.loads(request.get_data().decode("utf-8"))
@@ -343,10 +351,16 @@ def api_recognize():
             _confirm_buffer.pop(client_key, None)
             return jsonify({"ok": True, "name": "Unknown", "conf": round(conf, 1)})
 
+        name = _names_cache.get(label, "Unknown")
+
         # Multi-frame confirmation buffer
         buf = _confirm_buffer.get(client_key, {"label": -1, "count": 0, "conf_sum": 0.0})
 
-        if buf["label"] == label:
+        # If already marked this session (cooldown sentinel count=999), return already_marked
+        if buf.get("marked") and buf["label"] == label:
+            return jsonify({"ok": True, "name": name, "conf": round(conf, 1), "already_marked": True})
+
+        if buf["label"] == label and not buf.get("marked"):
             buf["count"] += 1
             buf["conf_sum"] += conf
         else:
@@ -354,7 +368,6 @@ def api_recognize():
 
         _confirm_buffer[client_key] = buf
 
-        name = _names_cache.get(label, "Unknown")
         avg_conf = round(buf["conf_sum"] / buf["count"], 1)
 
         if buf["count"] < _CONFIRM_FRAMES:
@@ -371,6 +384,8 @@ def api_recognize():
         _confirm_buffer.pop(client_key, None)
         if name != "Unknown":
             pstore.mark_attendance(str(label), name)
+            # Set cooldown so same person isn't re-announced in same session
+            _confirm_buffer[client_key] = {"label": label, "count": 999, "conf_sum": 0.0, "marked": True}
         return jsonify({"ok": True, "name": name, "conf": avg_conf, "confirmed": True})
 
     except Exception as e:
