@@ -6,9 +6,6 @@
 # OpenCV for training and live recognition
 opencv-python-headless==4.9.0.80
 
-# Deep learning face recognition
-cmake
-face_recognition
 
 # Scientific computing
 numpy>=1.24.0,<2.0.0
