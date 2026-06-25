@@ -253,11 +253,6 @@ def api_train():
         student_names = list(id_name_map.values())
         msg = f"Training complete! {len(student_names)} student(s): {', '.join(student_names)}"
 
-        # Reset in-memory cache so next recognition reloads the fresh model
-        global _recognizer_cache, _names_cache
-        _recognizer_cache = None
-        _names_cache = None
-
         return jsonify({"ok": True, "students": student_names, "message": msg})
 
     except Exception as e:
