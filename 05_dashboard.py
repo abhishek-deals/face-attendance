@@ -580,7 +580,18 @@ def page_today():
   <table><thead><tr><th>#</th><th>Photo</th><th>ID</th><th>Name</th><th>Time</th><th>Status</th></tr></thead>
   <tbody>{rows}</tbody></table></div>
 <p style="font-size:12px;color:var(--muted);text-align:right">Auto-refreshes every 30s</p>
-<script>setTimeout(()=>location.reload(),30000);</script>"""
+<script>
+// Auto-refresh every 30 seconds
+setTimeout(()=>location.reload(), 30000);
+// Also refresh within 3 seconds if a student was just deleted
+setInterval(function() {{
+  var ts = localStorage.getItem('student_deleted');
+  if (ts && (Date.now() - parseInt(ts)) < 10000) {{
+    localStorage.removeItem('student_deleted');
+    location.reload();
+  }}
+}}, 3000);
+</script>"""
     else:
         table = """<div class="card"><div class="card-header"><h2>Today's Attendance</h2></div>
   <div class="empty"><div class="icon">&#128247;</div>
@@ -623,6 +634,17 @@ def page_all():
     else:
         body = """<div class="card"><div class="card-header"><h2>All Records</h2></div>
   <div class="empty"><div class="icon">&#128452;</div><p>No records yet. Mark attendance first.</p></div></div>"""
+    # Add listener to auto-refresh if student was deleted from Students page
+    body += """
+<script>
+setInterval(function() {{
+  var ts = localStorage.getItem('student_deleted');
+  if (ts && (Date.now() - parseInt(ts)) < 10000) {{
+    localStorage.removeItem('student_deleted');
+    location.reload();
+  }}
+}}, 3000);
+</script>"""
     return html_page("All Records", body, "All Records")
 
 
@@ -674,6 +696,8 @@ async function deleteStudent(sid) {{
     }});
     const data = await res.json();
     if (data.ok) {{
+      // Signal other pages to refresh
+      localStorage.setItem('student_deleted', Date.now());
       // Instantly remove student row from table without full reload
       const btn = document.querySelector('button[onclick="deleteStudent(\'" + sid + "\')"]');
       if (btn) {{
