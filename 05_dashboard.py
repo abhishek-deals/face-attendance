@@ -216,12 +216,12 @@ def html_page(title, body_content, active=""):
 
 :root {{
   --bg: #09090b;
-  --bg-glow: radial-gradient(circle at 50% -20%, #3b0764, #09090b 60%);
+  --bg-glow: radial-gradient(circle at 50% -20%, #0c4a6e, #09090b 60%);
   --card: rgba(24, 24, 27, 0.7);
   --border: rgba(255, 255, 255, 0.08);
   --border-hover: rgba(255, 255, 255, 0.15);
-  --accent: #8b5cf6;
-  --accent-hover: #a78bfa;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
   --accent2: #06b6d4;
   --text: #f8fafc;
   --muted: #94a3b8;
@@ -231,7 +231,7 @@ def html_page(title, body_content, active=""):
   --red-bg: rgba(239, 68, 68, 0.15);
   --yellow: #f59e0b;
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-  --glow-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  --glow-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
 }}
 
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -261,7 +261,7 @@ body {{
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #a78bfa, #22d3ee);
+  background: linear-gradient(135deg, #60a5fa, #22d3ee);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -303,8 +303,8 @@ nav a:hover {{
 nav a.active {{
   color: var(--text);
   border-color: var(--accent);
-  background: linear-gradient(to top, rgba(139, 92, 246, 0.15) 0%, transparent 100%);
-  text-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+  background: linear-gradient(to top, rgba(59, 130, 246, 0.15) 0%, transparent 100%);
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
 }}
 
 /* CONTAINER & CARDS */
@@ -358,7 +358,7 @@ nav a.active {{
 .stat-label {{ font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }}
 .stat-value {{ font-size: 42px; font-weight: 800; margin: 8px 0 4px; letter-spacing: -1px; }}
 .stat-value.green {{ color: var(--green); text-shadow: 0 0 20px rgba(16,185,129,0.3); }}
-.stat-value.purple {{ color: var(--accent); text-shadow: 0 0 20px rgba(139,92,246,0.3); }}
+.stat-value.purple {{ color: var(--accent); text-shadow: 0 0 20px rgba(59, 130, 246,0.3); }}
 .stat-value.teal {{ color: var(--accent2); text-shadow: 0 0 20px rgba(6,182,212,0.3); }}
 .stat-value.yellow {{ color: var(--yellow); text-shadow: 0 0 20px rgba(245,158,11,0.3); }}
 .stat-sub {{ font-size: 13px; font-weight: 500; color: var(--muted); }}
@@ -366,7 +366,7 @@ nav a.active {{
 /* PILLS */
 .pill {{ display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border-radius: 30px; font-size: 12px; font-weight: 700; letter-spacing: 0.3px; }}
 .pill.present {{ background: var(--green-bg); color: var(--green); border: 1px solid rgba(16,185,129,0.2); }}
-.pill.id {{ background: rgba(139,92,246,0.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.2); }}
+.pill.id {{ background: rgba(59, 130, 246,0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246,0.2); }}
 .pill.red {{ background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }}
 
 /* TABLES */
@@ -387,11 +387,11 @@ tr:hover td {{ background: rgba(255,255,255,0.02); }}
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-decoration: none; outline: none; gap: 8px;
 }}
 .btn-primary {{
-  background: linear-gradient(135deg, var(--accent), #6d28d9);
-  color: white; box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+  background: linear-gradient(135deg, var(--accent), #1d4ed8);
+  color: white; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
 }}
 .btn-primary:hover {{
-  transform: translateY(-2px); box-shadow: 0 6px 20px rgba(139, 92, 246, 0.6);
+  transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.6);
 }}
 .btn-success {{
   background: linear-gradient(135deg, var(--green), #059669);
@@ -420,7 +420,7 @@ tr:hover td {{ background: rgba(255,255,255,0.02); }}
   transition: all 0.3s; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
 }}
 .form-group input:focus {{
-  border-color: var(--accent); background: rgba(0,0,0,0.5); box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+  border-color: var(--accent); background: rgba(0,0,0,0.5); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }}
 
 /* CAMERA & UPLOAD */
@@ -441,19 +441,19 @@ tr:hover td {{ background: rgba(255,255,255,0.02); }}
   border: 2px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center;
   cursor: pointer; transition: all 0.3s; background: rgba(255,255,255,0.01);
 }}
-.upload-zone:hover {{ border-color: var(--accent); background: rgba(139,92,246,0.05); transform: scale(1.02); }}
+.upload-zone:hover {{ border-color: var(--accent); background: rgba(59, 130, 246,0.05); transform: scale(1.02); }}
 
 /* MISC */
 .status-box {{ padding: 16px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; margin-top: 16px; display: none; }}
 .status-box.success {{ background: var(--green-bg); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }}
 .status-box.error {{ background: var(--red-bg); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }}
-.status-box.info {{ background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.3); color: #c4b5fd; }}
+.status-box.info {{ background: rgba(59, 130, 246,0.15); border: 1px solid rgba(59, 130, 246,0.3); color: #93c5fd; }}
 
 .empty {{ text-align: center; padding: 60px 20px; color: var(--muted); }}
 .empty .icon {{ font-size: 56px; margin-bottom: 16px; opacity: 0.8; }}
 
 .progress-bar {{ background: rgba(0,0,0,0.5); border-radius: 10px; height: 12px; overflow: hidden; margin: 16px 0; border: 1px solid var(--border); }}
-.progress-fill {{ height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 10px; transition: width 0.4s ease-out; box-shadow: 0 0 10px rgba(139,92,246,0.5); }}
+.progress-fill {{ height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 10px; transition: width 0.4s ease-out; box-shadow: 0 0 10px rgba(59, 130, 246,0.5); }}
 
 .tab-bar {{ display: flex; gap: 8px; margin-bottom: 24px; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 12px; border: 1px solid var(--border); }}
 .tab {{ flex: 1; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: var(--muted); transition: all 0.3s; }}
@@ -469,7 +469,7 @@ footer {{ text-align: center; padding: 30px; color: var(--muted); font-size: 13p
 <body>
 <div class="topbar">
   <h1 style="display:flex;align-items:center;gap:12px">
-    <img src="/logo.png" style="width:34px;height:34px;border-radius:8px;box-shadow:0 2px 10px rgba(139,92,246,0.4)"> 
+    <img src="/logo.png" style="width:34px;height:34px;border-radius:8px;box-shadow:0 2px 10px rgba(59, 130, 246,0.4)"> 
     Face Attendance System
   </h1>
   <div class="badge">{get_today()} &nbsp;|&nbsp; {get_time()}</div>
@@ -524,8 +524,16 @@ def page_today():
           <td><span class="pill present">&#10003; Present</span></td></tr>"""
           for i,r in enumerate(records,1))
         table = f"""<div class="card">
-  <div class="card-header"><h2>Today's Attendance &mdash; {today}</h2>
-    <span class="pill present">{len(records)} Present</span></div>
+  <div class="card-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <h2>Today's Attendance &mdash; {today}</h2>
+      <span class="pill present">{len(records)} Present</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a href="/api/export/csv?date=today" class="btn btn-outline" style="padding:4px 12px;font-size:13px;text-decoration:none;border-color:var(--border)">📥 CSV</a>
+      <a href="/api/export/excel?date=today" class="btn btn-outline" style="padding:4px 12px;font-size:13px;text-decoration:none;border-color:var(--green);color:var(--green)">📥 Excel</a>
+    </div>
+  </div>
   <table><thead><tr><th>#</th><th>Photo</th><th>ID</th><th>Name</th><th>Time</th><th>Status</th></tr></thead>
   <tbody>{rows}</tbody></table></div>
 <p style="font-size:12px;color:var(--muted);text-align:right">Auto-refreshes every 30s</p>
@@ -557,8 +565,16 @@ def page_all():
           <td><span class="pill present">Present</span></td></tr>"""
           for i,r in enumerate(records,1))
         body = f"""<div class="card">
-  <div class="card-header"><h2>All Attendance Records</h2>
-    <span class="pill present">{len(records)} Records</span></div>
+  <div class="card-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <h2>All Attendance Records</h2>
+      <span class="pill present">{len(records)} Records</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a href="/api/export/csv?date=all" class="btn btn-outline" style="padding:4px 12px;font-size:13px;text-decoration:none;border-color:var(--border)">📥 CSV</a>
+      <a href="/api/export/excel?date=all" class="btn btn-outline" style="padding:4px 12px;font-size:13px;text-decoration:none;border-color:var(--green);color:var(--green)">📥 Excel</a>
+    </div>
+  </div>
   <table><thead><tr><th>#</th><th>ID</th><th>Name</th><th>Date</th><th>Time</th><th>Status</th></tr></thead>
   <tbody>{rows}</tbody></table></div>"""
     else:
@@ -1716,7 +1732,7 @@ def api_delete_student(body_bytes):
         sid = str(data.get("student_id", "")).strip()
         pwd = data.get("password", "")
         
-        if pwd != "vercel":
+        if pwd != "abhishekk":
             return {"ok": False, "error": "Incorrect password!"}
             
         if not sid:
@@ -1761,6 +1777,47 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(enc)
 
+    def export_data(self, date_filter, format="csv"):
+        if IS_CLOUD and pstore:
+            try:
+                if date_filter == "all":
+                    records = pstore.get_all_report()
+                else:
+                    records = pstore.get_today_report()
+            except Exception:
+                records = []
+        else:
+            if date_filter == "all":
+                records = db_query("SELECT student_id,name,date,time FROM attendance ORDER BY date DESC,time DESC")
+            else:
+                today = get_today()
+                records = db_query("SELECT student_id,name,date,time FROM attendance WHERE date=? ORDER BY time", (today,))
+        
+        lines = ["Student ID,Name,Date,Time"]
+        for r in records:
+            lines.append(f"{r['student_id']},{r['name']},{r['date']},{r['time']}")
+        csv_content = "\n".join(lines) + "\n"
+        enc = csv_content.encode("utf-8")
+
+        filename = f"attendance_{'all' if date_filter == 'all' else get_today()}"
+        
+        self.send_response(200)
+        if format == "excel":
+            html_table = "<table><tr><th>Student ID</th><th>Name</th><th>Date</th><th>Time</th></tr>"
+            for r in records:
+                html_table += f"<tr><td>{r['student_id']}</td><td>{r['name']}</td><td>{r['date']}</td><td>{r['time']}</td></tr>"
+            html_table += "</table>"
+            enc = html_table.encode("utf-8")
+            self.send_header("Content-Type", "application/vnd.ms-excel")
+            self.send_header("Content-Disposition", f"attachment; filename={filename}.xls")
+        else:
+            self.send_header("Content-Type", "text/csv")
+            self.send_header("Content-Disposition", f"attachment; filename={filename}.csv")
+            
+        self.send_header("Content-Length", str(len(enc)))
+        self.end_headers()
+        self.wfile.write(enc)
+
     def do_GET(self):
         p = urlparse(self.path).path
         try:
@@ -1770,6 +1827,12 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             elif p == "/register":      self.send_html(page_register())
             elif p == "/live":          self.send_html(page_live())
             elif p == "/train":         self.send_html(page_train())
+            elif p == "/api/export/csv":
+                date_filter = parse_qs(urlparse(self.path).query).get('date', ['today'])[0]
+                self.export_data(date_filter, format="csv")
+            elif p == "/api/export/excel":
+                date_filter = parse_qs(urlparse(self.path).query).get('date', ['today'])[0]
+                self.export_data(date_filter, format="excel")
             elif p == "/api/status":
                 self.send_json(training_status)
             elif p == "/api/check_student":

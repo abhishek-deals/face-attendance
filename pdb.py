@@ -30,7 +30,9 @@ class datetime(dt):
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # SQLite DB path — /tmp is writable on Vercel serverless
-_SQLITE_PATH = os.environ.get("DB_PATH", "/tmp/faceattendance.db")
+_is_vercel = bool(os.environ.get("VERCEL", ""))
+_default_db = "/tmp/faceattendance.db" if _is_vercel else "attendance.db"
+_SQLITE_PATH = os.environ.get("DB_PATH", _default_db)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend selection helper

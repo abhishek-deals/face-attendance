@@ -348,7 +348,7 @@ def api_delete_student():
         sid  = str(data.get("student_id", "")).strip()
         pwd  = data.get("password", "")
 
-        if pwd != "vercel": return jsonify({"ok": False, "error": "Incorrect password! (hint: vercel)"})
+        if pwd != "abhishekk": return jsonify({"ok": False, "error": "Incorrect password! (hint: abhishekk)"})
         if not sid: return jsonify({"ok": False, "error": "Missing student ID"})
 
         pstore.delete_student(sid)
@@ -370,6 +370,44 @@ def api_check_student():
             if str(s['id']) == str(sid): return jsonify({"exists": True, "name": s['name']})
     except Exception: pass
     return jsonify({"exists": False})
+
+@app.route('/api/export/csv')
+def api_export_csv():
+    date_filter = request.args.get('date', 'today')
+    try:
+        if date_filter == "all": records = pstore.get_all_report()
+        else: records = pstore.get_today_report()
+    except Exception: records = []
+    
+    lines = ["Student ID,Name,Date,Time"]
+    for r in records: lines.append(f"{r['student_id']},{r['name']},{r['date']},{r['time']}")
+    csv_content = "\n".join(lines) + "\n"
+    
+    filename = f"attendance_{'all' if date_filter == 'all' else dashboard.get_today()}.csv"
+    return Response(
+        csv_content,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.route('/api/export/excel')
+def api_export_excel():
+    date_filter = request.args.get('date', 'today')
+    try:
+        if date_filter == "all": records = pstore.get_all_report()
+        else: records = pstore.get_today_report()
+    except Exception: records = []
+    
+    html_table = "<table><tr><th>Student ID</th><th>Name</th><th>Date</th><th>Time</th></tr>"
+    for r in records: html_table += f"<tr><td>{r['student_id']}</td><td>{r['name']}</td><td>{r['date']}</td><td>{r['time']}</td></tr>"
+    html_table += "</table>"
+    
+    filename = f"attendance_{'all' if date_filter == 'all' else dashboard.get_today()}.xls"
+    return Response(
+        html_table,
+        mimetype="application/vnd.ms-excel",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.route('/api/db_info')
 def api_db_info():
