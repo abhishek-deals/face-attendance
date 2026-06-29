@@ -873,7 +873,7 @@ function stopCamera() {
 }
 
 async function captureStraightPhoto(photoIndex) {
-  const total = 8;
+  const total = 3;
   const num = photoIndex + 1;
   const msg = `📸 Photo ${num} of ${total} — Look STRAIGHT at the camera`;
   showStatus('cam_status', msg + ' (detecting face...)', 'info');
@@ -884,15 +884,15 @@ async function captureStraightPhoto(photoIndex) {
     const { dataUrl, faceFound, isCentered } = captureFrameWithFaceDetect();
 
     if (!faceFound) {
-      if (attempts % 8 === 0)
+      if (attempts % 5 === 0)
         showStatus('cam_status', msgs[photoIndex] + ' — No face detected. Look straight at the camera.', 'info');
-      await sleep(200);
+      await sleep(100);
       continue;
     }
     if (!isCentered) {
-      if (attempts % 8 === 0)
+      if (attempts % 5 === 0)
         showStatus('cam_status', msgs[photoIndex] + ' — Face not centered. Move closer and look straight.', 'info');
-      await sleep(200);
+      await sleep(100);
       continue;
     }
 
@@ -908,17 +908,17 @@ async function captureStraightPhoto(photoIndex) {
         const target = data.target || 20;
         updateCamProgress(captureCount, target);
         showStatus('cam_status', `✅ Photo ${captureCount} of ${target} captured!`, 'success');
-        await sleep(1200); // 1.2s pause between photos
+        await sleep(300); // 0.3s pause between photos
         break;
       } else if (!data.ok) {
         showStatus('cam_status', 'Server Error: ' + data.error, 'error');
-        await sleep(2000);
+        await sleep(500);
       }
     } catch(e) {
       showStatus('cam_status', 'Network Error: ' + e.message, 'error');
-      await sleep(2000);
+      await sleep(500);
     }
-    await sleep(200);
+    await sleep(100);
   }
 }
 
@@ -929,15 +929,15 @@ async function startGuidedCapture() {
   document.getElementById('btn_capture').style.display = 'none';
   document.getElementById('btn_stop').style.display = 'inline-block';
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 3; i++) {
     if (!capturing) break;
     await captureStraightPhoto(i);
   }
 
   capturing = false;
   document.getElementById('btn_stop').style.display = 'none';
-  if (captureCount >= 8) { onCaptureDone(); }
-  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' of 8 photos saved.', 'info'); }
+  if (captureCount >= 3) { onCaptureDone(); }
+  else { showStatus('cam_status', 'Capture stopped. ' + captureCount + ' of 3 photos saved.', 'info'); }
 }
 
 function stopCapture() {
