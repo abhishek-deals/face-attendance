@@ -27,7 +27,7 @@ class datetime(dt):
     def now(cls, tz=None):
         return dt.now(IST)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:ABHISHEK%40116%2311@db.amplnbhtrfcnlrxjtfwv.supabase.co:5432/postgres")
 
 # SQLite DB path — /tmp is writable on Vercel serverless
 _is_vercel = bool(os.environ.get("VERCEL", ""))
