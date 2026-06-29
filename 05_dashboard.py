@@ -210,9 +210,26 @@ def html_page(title, body_content, active=""):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="x-dns-prefetch-control" content="on">
 <title>{title} | Face Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* PAGE TRANSITION */
+#nprogress-bar {{
+  position: fixed; top: 0; left: 0; z-index: 9999;
+  height: 3px; width: 0%; background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  transition: width 0.3s ease, opacity 0.4s ease;
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+}}
+body {{ opacity: 1; transition: opacity 0.15s ease; }}
+body.navigating {{ opacity: 0.6; }}
+
 
 :root {{
   --bg: #09090b;
@@ -479,6 +496,32 @@ footer {{ text-align: center; padding: 30px; color: var(--muted); font-size: 13p
 {body_content}
 </div>
 <footer>Face Recognition Attendance System &nbsp;|&nbsp; Deep Learning (SFace) &nbsp;|&nbsp; SQLite Database</footer>
+<div id="nprogress-bar"></div>
+<script>
+(function() {{
+  var bar = document.getElementById('nprogress-bar');
+  // Intercept all nav link clicks to show instant loading feedback
+  document.addEventListener('click', function(e) {{
+    var link = e.target.closest('a[href]');
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto') || href.startsWith('/api/')) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+    // Show loading bar immediately
+    bar.style.width = '20%';
+    bar.style.opacity = '1';
+    document.body.classList.add('navigating');
+    setTimeout(function() {{ bar.style.width = '70%'; }}, 80);
+    setTimeout(function() {{ bar.style.width = '90%'; }}, 250);
+  }});
+  // On page load complete, finish bar
+  window.addEventListener('pageshow', function() {{
+    bar.style.width = '100%';
+    document.body.classList.remove('navigating');
+    setTimeout(function() {{ bar.style.opacity = '0'; bar.style.width = '0%'; }}, 300);
+  }});
+}})();
+</script>
 </body>
 </html>"""
 
@@ -630,8 +673,18 @@ async function deleteStudent(sid) {{
       body: JSON.stringify({{ student_id: sid, password: pwd }})
     }});
     const data = await res.json();
-    if (data.ok) {{ alert("Student deleted!"); location.reload(); }}
-    else {{ alert("Error: " + data.error); }}
+    if (data.ok) {{
+      // Instantly remove student row from table without full reload
+      const btn = document.querySelector('button[onclick="deleteStudent(\'" + sid + "\')"]');
+      if (btn) {{
+        const row = btn.closest('tr');
+        if (row) {{
+          row.style.transition = 'opacity 0.4s';
+          row.style.opacity = '0';
+          setTimeout(() => row.remove(), 400);
+        }}
+      }}
+    }} else {{ alert("Error: " + data.error); }}
   }} catch(e) {{ alert("Error: " + e.message); }}
 }}
 </script>"""
@@ -791,8 +844,8 @@ def page_register():
             &bull; Good lighting is important<br>
             &bull; Move slightly between captures<br>
             &bull; Keep 40-80cm from camera<br>
-            &bull; Only 8 photos needed!<br>
-            &bull; Auto-augments to 88+ samples
+            &bull; Only 3 photos needed!<br>
+            &bull; Auto-augments to 30+ samples
           </div>
           <div class="status-box" id="cam_status"></div>
           <div id="done_section" style="display:none;margin-top:16px">
@@ -985,7 +1038,7 @@ function captureFrame() {
 }
 
 function updateCamProgress(count, target) {
-  const t = target || 20;
+  const t = 3;
   const pct = Math.min(100, Math.round(count / t * 100));
   document.getElementById('progress_fill').style.width = pct + '%';
   document.getElementById('progress_text').textContent = count + ' of ' + t + ' photos captured';
@@ -1765,6 +1818,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(enc)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(enc)
 
