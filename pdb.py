@@ -297,6 +297,42 @@ def get_all_report():
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+def delete_student(sid):
+    """Delete a student and ALL their attendance + photo records. Returns True on success."""
+    sid = str(sid)
+    if _use_postgres():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM attendance WHERE student_id = %s", (sid,))
+                cur.execute("DELETE FROM face_photos WHERE student_id = %s", (sid,))
+                cur.execute("DELETE FROM students WHERE student_id = %s", (sid,))
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            print("[delete_student PG error]", e)
+            return False
+        finally:
+            conn.close()
+    else:
+        conn = _sqlite_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM attendance WHERE student_id = ?", (sid,))
+            cur.execute("DELETE FROM face_photos WHERE student_id = ?", (sid,))
+            cur.execute("DELETE FROM students WHERE student_id = ?", (sid,))
+            conn.commit()
+            return True
+        except Exception as e:
+            print("[delete_student SQLite error]", e)
+            return False
+        finally:
+            conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 def get_students_list():
     """Return all registered students as a list of dicts."""
     if _use_postgres():

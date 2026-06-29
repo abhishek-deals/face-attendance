@@ -1808,23 +1808,33 @@ def api_delete_student(body_bytes):
         data = json.loads(body_bytes.decode("utf-8"))
         sid = str(data.get("student_id", "")).strip()
         pwd = data.get("password", "")
-        
+
         if pwd != "abhishekk":
             return {"ok": False, "error": "Incorrect password!"}
-            
+
         if not sid:
             return {"ok": False, "error": "Missing student ID"}
-            
-        # Delete from DB
-        db_execute("DELETE FROM students WHERE student_id=?", (sid,))
-        db_execute("DELETE FROM attendance WHERE student_id=?", (sid,))
-        
-        # Delete dataset folder
+
+        # Delete from DB — use pstore directly on cloud for reliable Supabase transaction
+        if IS_CLOUD and pstore:
+            try:
+                ok = pstore.delete_student(sid)
+                if not ok:
+                    return {"ok": False, "error": "Database deletion failed. Check server logs."}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        else:
+            # Local SQLite path
+            db_execute("DELETE FROM attendance WHERE student_id=?", (sid,))
+            db_execute("DELETE FROM face_photos WHERE student_id=?", (sid,))
+            db_execute("DELETE FROM students WHERE student_id=?", (sid,))
+
+        # Delete local dataset folder (if any)
         if os.path.exists(DATASET_PATH):
             for folder in os.listdir(DATASET_PATH):
                 if folder.startswith(f"{sid}_"):
                     shutil.rmtree(os.path.join(DATASET_PATH, folder), ignore_errors=True)
-                    
+
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
